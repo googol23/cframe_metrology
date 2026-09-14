@@ -2,24 +2,44 @@
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+
 [project]
 name = "detector-alignment"
-version = "0.3.0"
-description = "Detector alignment from a C-frame plane and directly measured reference centers"
+version = "0.4.0"
+description = "Detector alignment and ladder sensor metrology from laser-tracker and point-cloud measurements"
 readme = "README.md"
 requires-python = ">=3.11"
+
 dependencies = [
-  "numpy>=1.26",
-  "scipy>=1.11",
-  "matplotlib>=3.8",
-  "PyYAML>=6.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "PyYAML>=6.0",
 ]
 
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+]
+
 
 [project.scripts]
 detector-align = "detector_alignment.cli:main"
 
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
