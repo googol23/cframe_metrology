@@ -1,0 +1,40 @@
+# All lengths are millimetres.
+output_dir: output
+output_precision: 6
+
+io:
+  comment_prefixes: ["#", "//", "$"]
+  delimiter: whitespace
+
+# Default measurement uncertainty. Each reference may override this block.
+uncertainty:
+  mode: constant
+  sigma_xyz_mm: [0.008, 0.008, 0.008]
+
+cframe:
+  file: data/c_frame_facet.txt
+
+plane_fit:
+  ransac_iterations: 600
+  ransac_threshold_mm: 0.05
+  random_seed: 23
+
+# Each reference file contains exactly one measured XYZ center point.
+# nominal_center is the corresponding detector-coordinate [X, Y].
+references:
+  - file: data/hole_1.xyz
+    nominal_center: [0.0, 0.0]
+  - file: data/hole_2.xyz
+    nominal_center: [0.0, 500.0]
+
+reference_points:
+  derivative_step_rad: 1.0e-7
+
+visualization:
+  dpi: 600
+  sample_size: 50000
+  random_seed: 23
+
+# Optional point clouds that are transformed by the final registration.
+ladder_files: []
+  # - file: data/ladder_01.xyz

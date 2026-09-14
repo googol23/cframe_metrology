@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "detector-alignment"
+version = "0.3.0"
+description = "Detector alignment from a C-frame plane and directly measured reference centers"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "matplotlib>=3.8",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+detector-align = "detector_alignment.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
