@@ -17,6 +17,12 @@ class PointCloudData:
     header_lines: list[str]
     source: Path
 
+@dataclass
+class SensorPointCloud:
+    name: str
+    points: np.ndarray
+    covariances: np.ndarray | None
+    source: Path | None = None
 
 @dataclass
 class PlaneFitResult:
@@ -29,6 +35,14 @@ class PlaneFitResult:
     covariance_params: np.ndarray
     rotation_to_xy: np.ndarray
 
+
+@dataclass
+class SensorPlaneResult:
+    name: str
+    points: np.ndarray
+    plane: PlaneFitResult
+    source: Path | None = None
+    
 
 @dataclass
 class AlignmentResult:

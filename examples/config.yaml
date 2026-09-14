@@ -36,5 +36,35 @@ visualization:
   random_seed: 23
 
 # Optional point clouds that are transformed by the final registration.
-ladder_files: []
-  # - file: data/ladder_01.xyz
+ladder_analysis:
+  enabled: true
+
+  segmentation:
+    mode: segmented_files
+
+  sensors:
+    - name: S0
+      file: data/L1_000000.txt
+    - name: S1
+      file: data/L1_000001.txt
+    - name: S2
+      file: data/L1_000002.txt
+    - name: S3
+      file: data/L1_000003.txt
+    - name: S4
+      file: data/L1_000004.txt
+    - name: S5
+      file: data/L1_000005.txt
+    - name: S6
+      file: data/L1_000006.txt
+    - name: S7
+      file: data/L1_000007.txt
+    - name: S8
+      file: data/L1_000008.txt
+    - name: S9
+      file: data/L1_000009.txt
+      
+  # segmentation:
+  #   mode: automatic
+
+  # file: data/L1.txt
