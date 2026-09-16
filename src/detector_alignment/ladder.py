@@ -20,7 +20,6 @@ class SensorPointCloud:
 
     def __post_init__(self) -> None:
         self.points = np.asarray(self.points, dtype=float)
-
         if self.points.ndim != 2 or self.points.shape[1] != 3:
             raise ValueError(
                 f"Sensor {self.name!r}: points must have shape (N, 3); "
@@ -29,7 +28,6 @@ class SensorPointCloud:
 
         if len(self.points) < 3:
             raise ValueError(f"Sensor {self.name!r}: at least 3 points are required.")
-
         if not np.all(np.isfinite(self.points)):
             raise ValueError(
                 f"Sensor {self.name!r}: points contain NaN or infinite values."
@@ -37,7 +35,6 @@ class SensorPointCloud:
 
         if self.covariances is not None:
             self.covariances = np.asarray(self.covariances, dtype=float)
-
             expected = (len(self.points), 3, 3)
             if self.covariances.shape != expected:
                 raise ValueError(
@@ -70,6 +67,15 @@ class SensorPlaneResult:
         return self.residuals_mm[self.plane.inlier_mask]
 
 
+@dataclass(frozen=True)
+class _TransformedCloud:
+    """Internal cached representation of a loaded cloud in detector coordinates."""
+
+    points: np.ndarray
+    covariances: np.ndarray | None
+    source: Path | None
+
+
 AutomaticSegmenter = Callable[
     [np.ndarray, np.ndarray | None, dict],
     Iterable[SensorPointCloud],
@@ -80,17 +86,20 @@ class LadderProcessor:
     """
     Ladder point-cloud processing.
 
-    Two segmentation modes are supported:
+    The processor owns the scanner -> detector transformation.  Every point-cloud
+    file loaded through this class is transformed immediately and only the
+    transformed cloud is cached.
 
-    1. ``segmented_files``
-       One CloudCompare-exported file per sensor.
+    This gives both supported segmentation modes the same coordinate invariant:
 
-    2. ``automatic``
-       One complete ladder point cloud, segmented by a callable supplied
-       through ``automatic_segmenter``.
+    ``segmented_files``
+        Each sensor file is loaded, transformed, cached, then fitted.
 
-    Everything after segmentation is shared: transformation to detector
-    coordinates and per-sensor plane fitting.
+    ``automatic``
+        The complete ladder file is loaded, transformed, cached, then segmented.
+
+    The transformation is immutable for the lifetime of the processor.  Create a
+    new LadderProcessor if a different C-frame transformation is required.
     """
 
     def __init__(
@@ -99,11 +108,113 @@ class LadderProcessor:
         plane_fitter,
         resolve_path: Callable[[str | Path], Path] | None = None,
         automatic_segmenter: AutomaticSegmenter | None = None,
+        transformation=None,
     ) -> None:
         self.loader = loader
         self.plane_fitter = plane_fitter
         self.resolve_path = resolve_path or (lambda p: Path(p))
         self.automatic_segmenter = automatic_segmenter
+
+        self.rotation, self.translation = self._parse_transformation(transformation)
+
+        # IMPORTANT: this cache contains detector-frame clouds only.
+        self._cloud_cache: dict[tuple[str, str], _TransformedCloud] = {}
+
+    @staticmethod
+    def _parse_transformation(transformation) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Extract R and t from an AlignmentResult-like object, a 4x4 homogeneous
+        matrix, or a (rotation, translation) pair.
+
+        ``None`` is accepted as identity mainly for isolated tests.
+        """
+        if transformation is None:
+            return np.eye(3, dtype=float), np.zeros(3, dtype=float)
+
+        if hasattr(transformation, "rotation") and hasattr(
+            transformation, "translation"
+        ):
+            rotation = transformation.rotation
+            translation = transformation.translation
+        else:
+            array = np.asarray(transformation, dtype=float)
+            if array.shape == (4, 4):
+                rotation = array[:3, :3]
+                translation = array[:3, 3]
+            else:
+                try:
+                    rotation, translation = transformation
+                except (TypeError, ValueError) as exc:
+                    raise TypeError(
+                        "transformation must be AlignmentResult-like, a 4x4 "
+                        "homogeneous matrix, or a (rotation, translation) pair."
+                    ) from exc
+
+        R = np.asarray(rotation, dtype=float)
+        t = np.asarray(translation, dtype=float)
+
+        if R.shape != (3, 3):
+            raise ValueError(f"Transformation rotation must have shape (3, 3); got {R.shape}.")
+        if t.shape != (3,):
+            raise ValueError(f"Transformation translation must have shape (3,); got {t.shape}.")
+        if not np.all(np.isfinite(R)) or not np.all(np.isfinite(t)):
+            raise ValueError("Transformation contains NaN or infinite values.")
+
+        return R.copy(), t.copy()
+
+    @staticmethod
+    def _uncertainty_cache_key(uncertainty: dict | None) -> str:
+        if uncertainty is None:
+            return "None"
+        # Configuration dictionaries contain simple YAML values in this project.
+        return repr(sorted(uncertainty.items()))
+
+    def _load_transformed_cloud(
+        self,
+        filename: str | Path,
+        uncertainty: dict | None = None,
+    ) -> _TransformedCloud:
+        """
+        Load a cloud and immediately transform it to detector coordinates.
+
+        No caller in LadderProcessor should call ``self.loader.load`` directly.
+        This method is the single loading boundary and guarantees that the cache
+        never contains scanner-frame data.
+        """
+        path = Path(self.resolve_path(filename))
+        cache_key = (
+            str(path.resolve()),
+            self._uncertainty_cache_key(uncertainty),
+        )
+
+        cached = self._cloud_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        cloud = self.loader.load(path, uncertainty)
+
+        points = np.asarray(cloud.points, dtype=float) @ self.rotation.T + self.translation
+
+        covariances = None
+        if cloud.covariances is not None:
+            covariances = np.einsum(
+                "ij,njk,lk->nil",
+                self.rotation,
+                np.asarray(cloud.covariances, dtype=float),
+                self.rotation,
+            )
+
+        transformed = _TransformedCloud(
+            points=points,
+            covariances=covariances,
+            source=cloud.source,
+        )
+        self._cloud_cache[cache_key] = transformed
+        return transformed
+
+    def clear_cache(self) -> None:
+        """Discard all cached detector-frame clouds."""
+        self._cloud_cache.clear()
 
     def load_segmented_files(
         self,
@@ -113,12 +224,8 @@ class LadderProcessor:
         """
         Load one ASCII point-cloud file per sensor.
 
-        Expected configuration entry::
-
-            - name: S0
-              file: data/ladder/S0.xyz
-              uncertainty:   # optional, overrides default
-                mode: none
+        Every file is transformed to detector coordinates before it is cached
+        and before a SensorPointCloud is constructed.
         """
         if not sensor_configs:
             raise ValueError(
@@ -135,7 +242,6 @@ class LadderProcessor:
             name = str(cfg.get("name", "")).strip()
             if not name:
                 raise ValueError(f"Sensor entry {index} requires a non-empty 'name'.")
-
             if name in names:
                 raise ValueError(f"Duplicate sensor name: {name!r}.")
             names.add(name)
@@ -144,10 +250,8 @@ class LadderProcessor:
             if not filename:
                 raise ValueError(f"Sensor {name!r} requires a 'file' entry.")
 
-            path = Path(self.resolve_path(filename))
-
             uncertainty = cfg.get("uncertainty", default_uncertainty)
-            cloud = self.loader.load(path, uncertainty)
+            cloud = self._load_transformed_cloud(filename, uncertainty)
 
             sensors.append(
                 SensorPointCloud(
@@ -167,25 +271,23 @@ class LadderProcessor:
         uncertainty: dict | None = None,
     ) -> list[SensorPointCloud]:
         """
-        Load a complete ladder cloud and run an injected automatic segmenter.
+        Load and transform a complete ladder cloud, then segment it.
 
-        The automatic segmenter callable must have this signature::
+        The ordering here is intentional and must not be reversed:
 
-            segmenter(points, covariances, config)
-                -> Iterable[SensorPointCloud]
+            load -> scanner-to-detector transform -> cache -> segmentation
 
-        This deliberately keeps cbm_sts_tools-specific code outside the
-        generic ladder-processing module.
+        Thus an automatic segmenter may safely use detector-frame quantities such
+        as sensor Z layers and the ladder Y symmetry axis.
         """
         if self.automatic_segmenter is None:
             raise RuntimeError(
                 "Automatic ladder segmentation was requested, but no "
-                "automatic_segmenter was configured. Wire the "
-                "cbm_sts_tools.metrology segmenter through the adapter."
+                "automatic_segmenter was configured."
             )
 
         path = Path(self.resolve_path(filename))
-        cloud = self.loader.load(path, uncertainty)
+        cloud = self._load_transformed_cloud(path, uncertainty)
 
         cfg = segmentation_config or {}
         segmented = list(
@@ -209,7 +311,6 @@ class LadderProcessor:
                 raise TypeError(
                     "Automatic segmenter must return SensorPointCloud objects."
                 )
-
             if item.name in names:
                 raise ValueError(
                     f"Automatic segmenter returned duplicate sensor name {item.name!r}."
@@ -217,7 +318,7 @@ class LadderProcessor:
             names.add(item.name)
 
             if item.source is None:
-                item.source = path
+                item.source = cloud.source if cloud.source is not None else path
 
             validated.append(item)
 
@@ -244,7 +345,6 @@ class LadderProcessor:
                 raise ValueError(
                     "automatic ladder segmentation requires 'ladder_analysis.file'."
                 )
-
             return self.load_and_segment_automatically(
                 filename=filename,
                 segmentation_config=segmentation.get("config", {}),
@@ -259,50 +359,6 @@ class LadderProcessor:
             f"{mode!r}. Expected 'segmented_files' or 'automatic'."
         )
 
-    @staticmethod
-    def transform_sensor(
-        sensor: SensorPointCloud,
-        rotation: np.ndarray,
-        translation: np.ndarray,
-    ) -> SensorPointCloud:
-        """Transform one sensor cloud into detector coordinates."""
-        R = np.asarray(rotation, dtype=float)
-        t = np.asarray(translation, dtype=float)
-
-        if R.shape != (3, 3):
-            raise ValueError(f"rotation must have shape (3, 3); got {R.shape}.")
-        if t.shape != (3,):
-            raise ValueError(f"translation must have shape (3,); got {t.shape}.")
-
-        points = sensor.points @ R.T + t
-
-        covariances = None
-        if sensor.covariances is not None:
-            # C' = R C R^T for every point.
-            covariances = np.einsum(
-                "ij,njk,lk->nil",
-                R,
-                sensor.covariances,
-                R,
-            )
-
-        return SensorPointCloud(
-            name=sensor.name,
-            points=points,
-            covariances=covariances,
-            source=sensor.source,
-        )
-
-    def transform_sensors(
-        self,
-        sensors: Iterable[SensorPointCloud],
-        rotation: np.ndarray,
-        translation: np.ndarray,
-    ) -> list[SensorPointCloud]:
-        return [
-            self.transform_sensor(sensor, rotation, translation) for sensor in sensors
-        ]
-
     def fit_sensor_planes(
         self,
         sensors: Iterable[SensorPointCloud],
@@ -315,7 +371,6 @@ class LadderProcessor:
                 sensor.points,
                 sensor.covariances,
             )
-
             results.append(
                 SensorPlaneResult(
                     name=sensor.name,
@@ -335,7 +390,6 @@ class LadderProcessor:
         """JSON-serializable summary of one fitted sensor."""
         residuals = result.residuals_mm
         inlier_residuals = result.inlier_residuals_mm
-
         return {
             "name": result.name,
             "source_file": (str(result.source) if result.source is not None else None),
