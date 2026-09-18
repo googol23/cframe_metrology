@@ -28,11 +28,23 @@ class AlignmentPipeline:
     End-to-end detector alignment from a C-frame plane and measured centers.
 
     The C-frame analysis first determines the final scanner -> detector rigid
-    transformation.  That final transformation is then passed to LadderProcessor.
+    transformation. That final transformation is then passed to LadderProcessor.
 
     LadderProcessor owns application of that transformation: every ladder/sensor
     file is transformed immediately after loading and before it is cached,
     segmented, fitted, or plotted.
+
+    Output structure:
+
+        output/
+        ├── results.json
+        ├── images/
+        ├── matrices/
+        └── point_clouds/
+
+    Diagnostic images, numerical matrix products, and transformed point clouds
+    are kept separate. The machine-readable results.json remains directly in
+    the output root.
     """
 
     def __init__(self, config: dict):
@@ -87,7 +99,7 @@ class AlignmentPipeline:
             ),
         )
 
-        # LadderProcessor is intentionally NOT constructed here.  The final
+        # LadderProcessor is intentionally NOT constructed here. The final
         # C-frame transformation does not exist until run() reaches step 3.
         self.ladder_processor: LadderProcessor | None = None
 
@@ -238,8 +250,30 @@ class AlignmentPipeline:
     def run(self) -> AlignmentResult:
         logger.info("Starting detector-alignment pipeline.")
 
+        # ------------------------------------------------------------------
+        # Output structure
+        #
+        # output/
+        # ├── results.json
+        # ├── images/
+        # ├── matrices/
+        # └── point_clouds/
+        # ------------------------------------------------------------------
         outdir = self._resolve(self.config.get("output_dir", "output"))
         outdir.mkdir(parents=True, exist_ok=True)
+
+        images_dir = outdir / "images"
+        matrices_dir = outdir / "matrices"
+        point_clouds_dir = outdir / "point_clouds"
+
+        images_dir.mkdir(parents=True, exist_ok=True)
+        matrices_dir.mkdir(parents=True, exist_ok=True)
+        point_clouds_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.debug("Output root: %s", outdir)
+        logger.debug("Image output: %s", images_dir)
+        logger.debug("Matrix output: %s", matrices_dir)
+        logger.debug("Point-cloud output: %s", point_clouds_dir)
 
         uncertainty_default = self.config.get(
             "uncertainty",
@@ -288,7 +322,7 @@ class AlignmentPipeline:
             [ref.measured_xyz for ref in references]
         )
 
-        cframe_plane_plot = outdir / "cframe_plane_alignment.png"
+        cframe_plane_plot = images_dir / "cframe_plane_alignment.png"
         self.visualizer.plot_plane_alignment(
             cframe.points,
             plane.rotation_to_xy,
@@ -327,7 +361,7 @@ class AlignmentPipeline:
             yaw_rad=yaw,
         )
 
-        final_plot = outdir / "cframe_final_alignment.png"
+        final_plot = images_dir / "cframe_final_alignment.png"
         self.visualizer.plot_plane_alignment(
             cframe.points,
             R,
@@ -338,23 +372,32 @@ class AlignmentPipeline:
             title="C-frame final alignment",
         )
 
-        # 4. Ladder/sensor analysis.  The final C-frame result is passed into
+        # 4. Ladder/sensor analysis. The final C-frame result is passed into
         # LadderProcessor; the pipeline does not transform ladder clouds itself.
         logger.info("Step 4/5: checking ladder-analysis configuration.")
         sensor_results = self._process_ladder(
             alignment=result,
-            outdir=outdir,
+            images_dir=images_dir,
             uncertainty_default=uncertainty_default,
         )
 
         # 5. Outputs
         logger.info("Step 5/5: writing numerical and transformed outputs.")
+
+        # results.json -> output/
+        # *.npy        -> output/matrices/
         self._save_results(
             result,
             outdir,
+            matrices_dir,
             sensor_results=sensor_results,
         )
-        self._transform_outputs(result, outdir)
+
+        # transformed point clouds -> output/point_clouds/
+        self._transform_outputs(
+            result,
+            point_clouds_dir,
+        )
 
         logger.info("Detector-alignment pipeline completed successfully.")
         return result
@@ -362,7 +405,7 @@ class AlignmentPipeline:
     def _process_ladder(
         self,
         alignment: AlignmentResult,
-        outdir: Path,
+        images_dir: Path,
         uncertainty_default: dict,
     ) -> list[SensorPlaneResult]:
         """
@@ -371,6 +414,8 @@ class AlignmentPipeline:
         The final C-frame AlignmentResult is injected into LadderProcessor here.
         Therefore all ladder/sensor input files are transformed during loading,
         before caching and, in automatic mode, before segmentation.
+
+        All ladder/sensor diagnostic figures are written to images_dir.
         """
         cfg = self.config.get("ladder_analysis")
 
@@ -392,8 +437,7 @@ class AlignmentPipeline:
             mode,
         )
 
-        # CRITICAL CHANGE:
-        # construct the processor only after the final C-frame transform exists.
+        # Construct the processor only after the final C-frame transform exists.
         self.ladder_processor = LadderProcessor(
             loader=self.loader,
             plane_fitter=self.sensor_plane_fitter,
@@ -402,9 +446,9 @@ class AlignmentPipeline:
             transformation=alignment,
         )
 
-        # get_sensor_clouds() now returns detector-frame clouds in BOTH modes.
-        # In automatic mode the full ladder cloud was transformed before the
-        # automatic segmenter saw it.
+        # get_sensor_clouds() returns detector-frame clouds in BOTH modes.
+        # In automatic mode the full ladder cloud is transformed before the
+        # automatic segmenter sees it.
         sensors = self.ladder_processor.get_sensor_clouds(
             cfg,
             default_uncertainty=uncertainty_default,
@@ -426,7 +470,7 @@ class AlignmentPipeline:
                 ),
             )
 
-        # No transform_sensors() call here.  Applying the transform again would
+        # No transform_sensors() call here. Applying the transform again would
         # double-transform the clouds.
         logger.info("Fitting one plane per sensor in detector coordinates.")
         results = self.ladder_processor.fit_sensor_planes(sensors)
@@ -451,7 +495,7 @@ class AlignmentPipeline:
         show_outliers = bool(viz_cfg.get("show_outliers", False))
         point_size = float(viz_cfg.get("point_size", 2.0))
 
-        combined_plot = outdir / "ladder_sensor_plane_residuals.png"
+        combined_plot = images_dir / "ladder_sensor_plane_residuals.png"
         self.ladder_visualizer.plot_combined_residuals(
             results,
             combined_plot,
@@ -466,7 +510,7 @@ class AlignmentPipeline:
         if cfg.get("write_individual_plots", True):
             self.ladder_visualizer.plot_individual_residuals(
                 results,
-                outdir,
+                images_dir,
                 residual_percentile=residual_percentile,
                 show_outliers=show_outliers,
                 point_size=point_size,
@@ -478,10 +522,12 @@ class AlignmentPipeline:
     def _transform_outputs(
         self,
         result: AlignmentResult,
-        outdir: Path,
+        point_clouds_dir: Path,
     ) -> None:
         """
         Write transformed copies of configured input point-cloud files.
+
+        All transformed point clouds are written to point_clouds_dir.
 
         This output-writing operation is independent of LadderProcessor's
         in-memory transformed cache.
@@ -520,7 +566,8 @@ class AlignmentPipeline:
 
         for src in unique_files:
             suffix = src.suffix or ".xyz"
-            dst = outdir / f"{src.stem}_transformed{suffix}"
+            dst = point_clouds_dir / f"{src.stem}_transformed{suffix}"
+
             self.loader.transform_file_streaming(
                 src,
                 dst,
@@ -552,27 +599,56 @@ class AlignmentPipeline:
         self,
         result: AlignmentResult,
         outdir: Path,
+        matrices_dir: Path,
         sensor_results: list[SensorPlaneResult] | None = None,
     ) -> None:
-        np.save(outdir / "rotation_matrix.npy", result.rotation)
-        np.save(outdir / "translation_vector.npy", result.translation)
-        np.save(outdir / "transform_matrix.npy", result.homogeneous)
+        """
+        Save numerical alignment products.
+
+        results.json is written directly to outdir.
+
+        Binary NumPy matrix and covariance products are written to
+        matrices_dir.
+        """
+
+        # ------------------------------------------------------------------
+        # Matrix / covariance products
+        # ------------------------------------------------------------------
         np.save(
-            outdir / "covariance_transform_params.npy",
+            matrices_dir / "rotation_matrix.npy",
+            result.rotation,
+        )
+        np.save(
+            matrices_dir / "translation_vector.npy",
+            result.translation,
+        )
+        np.save(
+            matrices_dir / "transform_matrix.npy",
+            result.homogeneous,
+        )
+        np.save(
+            matrices_dir / "covariance_transform_params.npy",
             result.covariance_transform_params,
         )
-        np.save(outdir / "covariance_joint.npy", result.covariance_joint)
         np.save(
-            outdir / "covariance_plane_params.npy",
+            matrices_dir / "covariance_joint.npy",
+            result.covariance_joint,
+        )
+        np.save(
+            matrices_dir / "covariance_plane_params.npy",
             result.plane.covariance_params,
         )
 
         for i, ref in enumerate(result.references, start=1):
             np.save(
-                outdir / f"covariance_reference_{i:02d}_conditional.npy",
+                matrices_dir
+                / f"covariance_reference_{i:02d}_conditional.npy",
                 ref.covariance_center_conditional,
             )
 
+        # ------------------------------------------------------------------
+        # JSON summary
+        # ------------------------------------------------------------------
         rotvec = Rotation.from_matrix(result.rotation).as_rotvec()
         sigma = np.sqrt(
             np.maximum(
@@ -653,6 +729,7 @@ class AlignmentPipeline:
                 "sensors": LadderProcessor.results_summary(sensor_results),
             }
 
+        # results.json intentionally remains directly in the output root.
         results_path = outdir / "results.json"
         with results_path.open("w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
