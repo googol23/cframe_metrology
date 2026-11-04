@@ -1,65 +1,93 @@
-# CloudComPy installation: Debian 12, no sudo
+# CloudComPy BIN exporter
 
-All paths are relative to the directory holding `install.sh`, which should be
-`<repo>/CloudCompare/`. The installation does not modify system Python.
+Self-contained, no-root CloudComPy installation for Debian 12. It exports each
+standalone point cloud returned from a CloudCompare `.bin` project to a separate
+`.txt` file named after the cloud entity.
 
-## Install
+Everything is installed and run inside this directory. System Python is not
+modified.
 
-1. Download `CloudComPy_Conda312_Linux64_20260528-1022.tar.xz` from
-   https://www.simulation.openfields.fr/index.php/cloudcompy-downloads/3-cloudcompy-binaries/17-production-cloudcompy-binaries/4-linux-cloudcompy-binaries/126-cloudcompy-conda312-linux64-20260526
-2. Put the archive in `<repo>/CloudCompare/` alongside these scripts.
-3. Run:
+## Requirements
 
-   ```bash
-   cd <repo>/CloudCompare
-   chmod +x install.sh run.sh
-   ./install.sh
-   ```
+- Debian 12 on x86_64 Linux (GLIBC 2.28 or newer)
+- `bash`, `curl`, and `tar`
+- Network access for the initial Python dependency installation
+- The official CloudComPy archive:
+  `CloudComPy_Conda312_Linux64_20260528-1022.tar.xz`
 
-   If a genuine direct archive URL is available, alternatively:
+Download the archive from the
+[official CloudComPy release page](https://www.simulation.openfields.fr/index.php/cloudcompy-downloads/3-cloudcompy-binaries/17-production-cloudcompy-binaries/4-linux-cloudcompy-binaries/126-cloudcompy-conda312-linux64-20260526)
+and place it in this directory beside `install.sh`.
 
-   ```bash
-   CLOUDCOMPY_URL='https://.../archive.tar.xz' ./install.sh
-   ```
+## 1. Install
 
-The script installs `uv` in `.tools/`, Python 3.12 in `.python/`, a virtual
-environment in `.venv/`, and unpacks CloudComPy under `CloudComPy312/`.
-It verifies a Python import. Network access to Astral's uv installer, Python
-distributions, and PyPI is required unless already cached.
-
-Verified on Debian 12 (x86_64, GLIBC 2.36) with the repository-local Python
-3.12 environment. The packaged environment script is not compatible with Bash
-`nounset`, so the wrappers disable `nounset` only while sourcing that script.
-
-## Export
-
-From the repository:
+From this directory:
 
 ```bash
-./CloudCompare/run.sh ./CloudCompare/export_clouds.py ./input/u3dl/data/scene.bin
+cd /path/to/pc_metrology/CloudCompare
+chmod +x install.sh run.sh
+./install.sh
 ```
 
-Or choose an output directory:
+The installer creates a local Python 3.12 environment, installs the required
+Python packages, extracts CloudComPy, and verifies `import cloudComPy`.
+Installation is rerunnable.
+
+If you have a verified direct archive URL, the installer can download it:
 
 ```bash
-./CloudCompare/run.sh ./CloudCompare/export_clouds.py ./input/u3dl/data/scene.bin --output ./input/u3dl/output/point_clouds
+CLOUDCOMPY_URL='https://example.com/CloudComPy_Conda312_Linux64_20260528-1022.tar.xz' ./install.sh
 ```
 
-`run.sh` preserves the caller's working directory, so relative script, BIN, and
-output paths resolve from the directory where the command is invoked.
+Do not use the release page itself as `CLOUDCOMPY_URL`; it must point directly
+to the `.tar.xz` file.
 
-`importFile` exports standalone point clouds returned by the API. Mesh-attached
-clouds and specialized hierarchy nodes are not guaranteed to be included.
-Existing text outputs are not overwritten by default; unique suffixes are
-used. Output columns depend on the CloudComPy ASCII writer. In the tested
-`examples/data/DetectorVertical.bin` fixture, each TXT row contained
-space-delimited XYZ values with 8 decimal places and no header.
+## 2. Export a BIN project
 
-## Limitations
+Run the exporter from this directory:
 
-The published release is documented for x86_64 Linux and GLIBC >= 2.28,
-but Debian 12 is not one of the distributions that the upstream authors report
-testing. Some headless servers may lack shared libraries required by Qt or
-CloudComPy; no-sudo installation cannot always remedy unavailable OS libraries.
-The tested headless import emitted Qt thread-shutdown and missing fontconfig
-configuration warnings, but completed successfully.
+```bash
+./run.sh ./export_clouds.py /path/to/project.bin
+```
+
+By default, TXT files are written beside the BIN file. To select an output
+directory:
+
+```bash
+./run.sh ./export_clouds.py /path/to/project.bin --output /path/to/output
+```
+
+Relative paths are resolved from the directory where `run.sh` is invoked, so
+the launcher can also be called from the repository root:
+
+```bash
+./CloudCompare/run.sh \
+  ./CloudCompare/export_clouds.py \
+  ./input/u3dl/U3DL.bin \
+  --output ./input/u3dl/output/point_clouds
+```
+
+Use `--overwrite` to replace existing TXT files:
+
+```bash
+./run.sh ./export_clouds.py /path/to/project.bin \
+  --output /path/to/output --overwrite
+```
+
+Without `--overwrite`, existing filenames are preserved and new files receive
+numeric suffixes such as `_2`.
+
+## Output and limitations
+
+- One `.txt` file is written per standalone cloud returned by
+  `cloudComPy.importFile`.
+- Filenames are derived from cloud entity names and sanitized for filesystem
+  safety.
+- Mesh-owned or hierarchy-nested clouds may not be included.
+- TXT columns are selected by CloudComPy's ASCII writer. The tested
+  `examples/data/DetectorVertical.bin` fixture produced space-delimited XYZ
+  values with eight decimal places and no header.
+- Headless execution uses Qt's `offscreen` platform. Qt thread-shutdown or
+  missing fontconfig warnings may appear even when import and export succeed.
+- Missing host shared libraries cannot always be fixed without administrator
+  access.
