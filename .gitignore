@@ -217,4 +217,16 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+
+*.zip
+*.tar*
+
+CloudCompare/CloudComPy*
+CloudCompare/.*
+
+examples/data
+examples/output
+
+input
+
 token
