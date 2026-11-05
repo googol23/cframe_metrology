@@ -28,7 +28,7 @@ def _write_synthetic_case(
 
     if fiducial_draw is not None:
         (data / "cframe_fiducials.xyz").write_text(
-            "1,2,10\n1,2,10\n3\t4\t10\n",
+            "1,2,10\n1.02,1.98,10.01\n3\t4\t10\n",
             encoding="utf-8",
         )
 
@@ -54,6 +54,7 @@ def _write_synthetic_case(
     if fiducial_draw is not None:
         cfg["fiducials"] = {
             "file": "data/cframe_fiducials.xyz",
+            "fiducial_min_distance": 0.5,
             "draw": fiducial_draw,
             "marker": "x",
         }
@@ -104,7 +105,7 @@ def test_pipeline_loads_transforms_and_optionally_draws_fiducials(
         if draw:
             np.testing.assert_allclose(
                 call["fiducial_points"],
-                [[1, 2, 10], [1, 2, 10], [3, 4, 10]],
+                [[1.01, 1.99, 10.005], [3, 4, 10]],
             )
         else:
             assert call["fiducial_points"] is None
@@ -114,9 +115,49 @@ def test_pipeline_loads_transforms_and_optionally_draws_fiducials(
     )
     np.testing.assert_allclose(
         transformed,
-        [[0, 0, 0], [0, 0, 0], [2, 2, 0]],
+        [[0, 0, 0], [0.02, -0.02, 0.01], [2, 2, 0]],
         atol=1e-8,
     )
+
+    averaged = np.loadtxt(
+        tmp_path
+        / "output"
+        / "point_clouds"
+        / "cframe_fiducials_averaged_transformed.xyz"
+    )
+    np.testing.assert_allclose(
+        averaged,
+        [[0.01, -0.01, 0.005], [2, 2, 0]],
+        atol=1e-8,
+    )
+
+    payload = json.loads(
+        (tmp_path / "output" / "results.json").read_text(encoding="utf-8")
+    )
+    assert payload["fiducials"]["marker_count"] == 2
+    first_marker = payload["fiducials"]["markers"][0]
+    assert first_marker["measurement_indices"] == [0, 1]
+    np.testing.assert_allclose(
+        first_marker["scanner"]["mean_xyz_mm"],
+        [1.01, 1.99, 10.005],
+    )
+    np.testing.assert_allclose(
+        first_marker["scanner"]["mean_uncertainty_stddev_xyz_mm"],
+        np.full(3, 0.01 / np.sqrt(2.0)),
+    )
+    np.testing.assert_allclose(
+        first_marker["detector"]["mean_xyz_mm"],
+        [0.01, -0.01, 0.005],
+        atol=1e-8,
+    )
+
+
+def test_fiducial_min_distance_is_required():
+    pipeline = AlignmentPipeline(
+        {"fiducials": {"file": "data/cframe_fiducials.xyz"}}
+    )
+    with pytest.raises(ValueError, match="fiducial_min_distance is required"):
+        pipeline._fiducials_config()
 
 
 def test_pipeline_processes_named_ladders_with_mixed_segmentation_modes(

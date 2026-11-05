@@ -8,6 +8,11 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import yaml
 
+from .fiducials import (
+    FiducialMarkerResult,
+    FiducialMeasurementResult,
+    FiducialProcessor,
+)
 from .io import AsciiPointCloudLoader
 from .ladder import LadderProcessor, SensorPlaneResult
 from .ladder_viz import LadderVisualizer
@@ -84,6 +89,7 @@ class AlignmentPipeline:
             comment_prefixes=comment_prefixes,
             delimiter="auto",
         )
+        self.fiducial_processor = FiducialProcessor()
 
         p_cfg = config.get("plane_fit", {})
         self.plane_fitter = RobustPlaneFitter(
@@ -274,6 +280,23 @@ class AlignmentPipeline:
             raise ValueError("fiducials must be a mapping.")
         if "file" not in cfg:
             raise ValueError("fiducials.file is required when fiducials are configured.")
+        if "fiducial_min_distance" not in cfg:
+            raise ValueError(
+                "fiducials.fiducial_min_distance is required when fiducials "
+                "are configured."
+            )
+        distance = cfg["fiducial_min_distance"]
+        if (
+            isinstance(distance, bool)
+            or not isinstance(distance, (int, float))
+            or not np.isfinite(distance)
+            or distance <= 0.0
+        ):
+            raise ValueError(
+                "fiducials.fiducial_min_distance must be a finite positive number."
+            )
+        if "uncertainty" in cfg and not isinstance(cfg["uncertainty"], dict):
+            raise ValueError("fiducials.uncertainty must be a mapping.")
         if "draw" in cfg and not isinstance(cfg["draw"], bool):
             raise ValueError("fiducials.draw must be true or false.")
         marker = cfg.get("marker", "x")
@@ -441,15 +464,24 @@ class AlignmentPipeline:
         )
 
         fiducials_cfg = self._fiducials_config()
+        fiducials = None
+        transformed_fiducials = None
         fiducial_points = None
         fiducial_marker = "x"
         if fiducials_cfg is not None:
             fiducials_path = self._resolve(fiducials_cfg["file"])
             logger.info("Loading C-frame fiducials: %s", fiducials_path)
-            fiducials = self.fiducial_loader.load(fiducials_path)
+            fiducial_data = self.fiducial_loader.load(
+                fiducials_path,
+                fiducials_cfg.get("uncertainty", uncertainty_default),
+            )
+            fiducials = self.fiducial_processor.process(
+                fiducial_data,
+                fiducials_cfg["fiducial_min_distance"],
+            )
             fiducial_marker = fiducials_cfg.get("marker", "x")
             if fiducials_cfg.get("draw", True):
-                fiducial_points = fiducials.points
+                fiducial_points = fiducials.means
 
         # 2. Measured references
         reference_cfg = self._reference_config()
@@ -511,6 +543,8 @@ class AlignmentPipeline:
             references=references,
             yaw_rad=yaw,
         )
+        if fiducials is not None:
+            transformed_fiducials = fiducials.transformed(R, t)
 
         final_plot = images_dir / "cframe_final_alignment.png"
         self.visualizer.plot_plane_alignment(
@@ -544,12 +578,15 @@ class AlignmentPipeline:
             outdir,
             matrices_dir,
             ladder_results=ladder_results,
+            fiducials=fiducials,
+            transformed_fiducials=transformed_fiducials,
         )
 
         # transformed point clouds -> output/point_clouds/
         self._transform_outputs(
             result,
             point_clouds_dir,
+            transformed_fiducials=transformed_fiducials,
         )
 
         logger.info("Detector-alignment pipeline completed successfully.")
@@ -677,6 +714,7 @@ class AlignmentPipeline:
         self,
         result: AlignmentResult,
         point_clouds_dir: Path,
+        transformed_fiducials: FiducialMeasurementResult | None = None,
     ) -> None:
         """
         Write transformed copies of configured input point-cloud files.
@@ -751,6 +789,24 @@ class AlignmentPipeline:
                 preserve_header=True,
             )
 
+        if transformed_fiducials is not None:
+            source = transformed_fiducials.source
+            suffix = source.suffix or ".xyz"
+            averaged_path = (
+                point_clouds_dir
+                / f"{source.stem}_averaged_transformed{suffix}"
+            )
+            precision = int(self.config.get("output_precision", 6))
+            np.savetxt(
+                averaged_path,
+                transformed_fiducials.means,
+                fmt=f"%.{precision}f",
+            )
+            logger.info(
+                "Averaged transformed fiducials written to %s",
+                averaged_path,
+            )
+
     @staticmethod
     def _serialize_reference(
         ref: MeasuredReferenceResult,
@@ -769,12 +825,72 @@ class AlignmentPipeline:
             ),
         }
 
+    @staticmethod
+    def _serialize_fiducial_frame(
+        marker: FiducialMarkerResult,
+    ) -> dict:
+        measurement_stddev = marker.measurement_stddev
+        return {
+            "measurements_xyz_mm": marker.measurement_points.tolist(),
+            "mean_xyz_mm": marker.mean.tolist(),
+            "measurement_stddev_xyz_mm": (
+                None
+                if measurement_stddev is None
+                else measurement_stddev.tolist()
+            ),
+            "measurement_covariance_xyz_mm2": (
+                None
+                if marker.measurement_covariance is None
+                else marker.measurement_covariance.tolist()
+            ),
+            "mean_uncertainty_stddev_xyz_mm": (
+                marker.mean_uncertainty_stddev.tolist()
+            ),
+            "mean_covariance_xyz_mm2": marker.mean_covariance.tolist(),
+        }
+
+    @classmethod
+    def _serialize_fiducials(
+        cls,
+        scanner: FiducialMeasurementResult,
+        detector: FiducialMeasurementResult,
+    ) -> dict:
+        markers = []
+        for scanner_marker, detector_marker in zip(
+            scanner.markers,
+            detector.markers,
+            strict=True,
+        ):
+            if scanner_marker.marker_id != detector_marker.marker_id:
+                raise ValueError("Scanner and detector fiducial IDs do not match.")
+            markers.append(
+                {
+                    "id": scanner_marker.marker_id,
+                    "measurement_indices": (
+                        scanner_marker.measurement_indices.tolist()
+                    ),
+                    "measurement_count": len(
+                        scanner_marker.measurement_indices
+                    ),
+                    "scanner": cls._serialize_fiducial_frame(scanner_marker),
+                    "detector": cls._serialize_fiducial_frame(detector_marker),
+                }
+            )
+        return {
+            "source_file": str(scanner.source),
+            "fiducial_min_distance_mm": scanner.fiducial_min_distance,
+            "marker_count": len(markers),
+            "markers": markers,
+        }
+
     def _save_results(
         self,
         result: AlignmentResult,
         outdir: Path,
         matrices_dir: Path,
         ladder_results: dict[str, list[SensorPlaneResult]] | None = None,
+        fiducials: FiducialMeasurementResult | None = None,
+        transformed_fiducials: FiducialMeasurementResult | None = None,
     ) -> None:
         """
         Save numerical alignment products.
@@ -893,6 +1009,16 @@ class AlignmentPipeline:
             ],
             "reference_spacing_check": spacing,
         }
+
+        if fiducials is not None:
+            if transformed_fiducials is None:
+                raise ValueError(
+                    "Transformed fiducial results are required for serialization."
+                )
+            payload["fiducials"] = self._serialize_fiducials(
+                fiducials,
+                transformed_fiducials,
+            )
 
         if ladder_results:
             ladder_configs = dict(self._ladder_configs())

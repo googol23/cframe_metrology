@@ -15,9 +15,12 @@ cframe:
   file: data/c_frame_facet.txt
 
 # Optional measured C-frame fiducials. Rows may be comma-, space-, or
-# tab-separated, and repeated measurements are kept as separate points.
+# tab-separated. Repeated measurements closer than the configured minimum
+# marker separation are clustered and averaged. This example inherits the
+# global uncertainty above; add fiducials.uncertainty to override it.
 fiducials:
   file: data/cframe_fiducials.xyz
+  fiducial_min_distance: 5.0
   draw: true
   # Matplotlib marker examples: "x", "+", "o", "^", "s", "D", "*"
   marker: "x"

@@ -277,13 +277,24 @@ A separate file containing measured C-frame fiducial points can be configured as
 ```yaml
 fiducials:
   file: data/cframe_fiducials.xyz
+  fiducial_min_distance: 5.0
+  # Optional; otherwise the global uncertainty block is used.
+  uncertainty:
+    mode: constant
+    sigma_xyz_mm: [0.008, 0.008, 0.008]
   draw: true
   marker: "x"
 ```
 
-The fiducial file contains at least three numerical `X`, `Y`, and `Z` columns in the same scanner coordinate system as the C-frame point cloud. Its rows may be comma-separated or separated by spaces/tabs; this detection is independent of the global `io.delimiter` setting. Repeated rows are preserved as distinct measurements and are not averaged or deduplicated.
+The fiducial file contains at least three numerical `X`, `Y`, and `Z` columns in the same scanner coordinate system as the C-frame point cloud. Its rows may be comma-separated or separated by spaces/tabs; this detection is independent of the global `io.delimiter` setting.
 
-The file is loaded whenever the `fiducials` section is present. The final scanner-to-detector transformation is applied when the transformed copy is written to `output/point_clouds/cframe_fiducials_transformed.xyz`. When `draw` is `true` (the default), the fiducials are also transformed with the same rotation and translation used for each C-frame diagnostic and overlaid on both the plane-leveling and final-alignment figures. Set `draw: false` to disable only the overlay; loading and transformed output remain enabled.
+`fiducial_min_distance` is a required positive distance in millimetres representing the minimum possible separation between two physical markers. Repeated measurements are grouped with deterministic complete-linkage clustering: every pair of measurements in one cluster must be closer than this value, while measurements at or beyond it belong to different markers. Each cluster is represented by its arithmetic mean.
+
+Fiducial uncertainty must be available either from `fiducials.uncertainty` or from the global `uncertainty` block. All point uncertainty modes supported by the ASCII loader remain available. For independent point measurements with covariances `C_i`, the covariance of a cluster mean is calculated as `sum(C_i) / n^2`. The observed sample standard deviation and the propagated standard deviation of the mean are reported separately.
+
+The file is loaded whenever the `fiducials` section is present. The final scanner-to-detector transformation is applied to the clustered measurements, means, and covariances. The unmodified raw rows remain available at `output/point_clouds/cframe_fiducials_transformed.xyz`, while one averaged point per physical marker is written to `output/point_clouds/cframe_fiducials_averaged_transformed.xyz`. When `draw` is `true` (the default), the averaged fiducials are overlaid on both the plane-leveling and final-alignment figures. Set `draw: false` to disable only the overlay; loading, clustering, statistics, and transformed outputs remain enabled.
+
+`FiducialMeasurementResult.transformed` accepts any finite `3 x 3` linear matrix plus translation, including scaling, and propagates covariance as `A @ C @ A.T`. The alignment pipeline itself continues to apply its rigid scanner-to-detector transformation.
 
 `marker` accepts a Matplotlib marker string. Common choices include `"x"`, `"+"`, `"o"`, `"^"`, `"s"`, `"D"`, and `"*"`; its default is `"x"`.
 
@@ -936,9 +947,10 @@ uncertainty:
 cframe:
   file: data/c_frame_facet.txt
 
-# Optional measured fiducials in the same scanner coordinate system.
+# Optional repeated fiducial measurements in scanner coordinates.
 fiducials:
   file: data/cframe_fiducials.xyz
+  fiducial_min_distance: 5.0
   draw: true
   marker: "x"
 
@@ -1064,7 +1076,7 @@ for the individual sensors. `results.json` stores the corresponding numerical su
 
 ## 28. Transformed point clouds
 
-Configured measurement inputs, including the optional fiducial file, are written back in transformed detector coordinates using names of the form:
+Configured measurement inputs, including the raw optional fiducial file, are written back in transformed detector coordinates using names of the form:
 
 ```text
 *_transformed.xyz
@@ -1074,7 +1086,7 @@ or with the corresponding original ASCII extension.
 
 Ladder-associated transformed files are prefixed by their configured ladder name to prevent collisions between ladders, unless the source stem already starts with that name. For example, `data/L1T0.txt` under ladder `L3DL1` is written as `L3DL1_L1T0_transformed.txt`, while `data/L3DL0.txt` under ladder `L3DL0` remains `L3DL0_transformed.txt`.
 
-These files are useful for independent inspection of the final detector-frame geometry in point-cloud visualization software.
+For configured fiducials, an additional `<fiducial_stem>_averaged_transformed.*` file contains one transformed mean point per clustered physical marker. These files are useful for independent inspection of the final detector-frame geometry in point-cloud visualization software.
 
 ---
 
@@ -1086,7 +1098,7 @@ These files are useful for independent inspection of the final detector-frame ge
 
 The global section contains the scanner-to-detector transformation and uncertainty information.
 
-When ladder analysis is enabled, sensor-plane results are additionally recorded.
+When fiducials are configured, a `fiducials` section records the clustering distance and each generated marker ID, its zero-based numeric-row membership, raw measurement points, mean, observed sample standard deviation, and propagated mean uncertainty in both scanner and detector coordinates. When ladder analysis is enabled, sensor-plane results are additionally recorded.
 
 A sensor result conceptually contains:
 
@@ -1131,6 +1143,7 @@ cframe_metrology/
 |   `-- detector_alignment/
 |       |-- __init__.py
 |       |-- cli.py
+|       |-- fiducials.py
 |       |-- io.py
 |       |-- ladder.py
 |       |-- ladder_viz.py
@@ -1144,6 +1157,7 @@ cframe_metrology/
 |       `-- viz.py
 |
 |-- tests/
+|   |-- test_fiducials.py
 |   |-- test_io.py
 |   |-- test_pipeline.py
 |   |-- test_reference.py
@@ -1160,6 +1174,7 @@ The principal responsibilities are:
 | Module            | Responsibility                                                                   |
 | ----------------- | -------------------------------------------------------------------------------- |
 | `pipeline.py`     | End-to-end alignment workflow and output generation                              |
+| `fiducials.py`    | Fiducial clustering, averaging, uncertainty, and affine transformation           |
 | `io.py`           | ASCII point-cloud and uncertainty loading                                        |
 | `plane.py`        | Robust plane estimation and plane uncertainty                                    |
 | `reference.py`    | Processing of directly measured reference centers                                |
