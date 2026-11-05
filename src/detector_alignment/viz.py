@@ -5,6 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+from matplotlib.markers import MarkerStyle
 from scipy.spatial import ConvexHull
 
 
@@ -269,6 +270,8 @@ class AlignmentVisualizer:
         path: str | Path,
         translation: np.ndarray | None = None,
         reference_points: np.ndarray | None = None,
+        fiducial_points: np.ndarray | None = None,
+        fiducial_marker: str = "x",
         title: str = "C-frame plane leveling",
     ) -> None:
         """
@@ -338,6 +341,12 @@ class AlignmentVisualizer:
                 dtype=float,
             )
 
+        if fiducial_points is not None:
+            fiducial_points = np.asarray(
+                fiducial_points,
+                dtype=float,
+            )
+
         # --------------------------------------------------------------
         # Validate input
         # --------------------------------------------------------------
@@ -356,6 +365,19 @@ class AlignmentVisualizer:
         ):
             raise ValueError("reference_points must have shape (N, 3).")
 
+        if fiducial_points is not None and (
+            fiducial_points.ndim != 2 or fiducial_points.shape[1] != 3
+        ):
+            raise ValueError("fiducial_points must have shape (N, 3).")
+
+        if fiducial_points is not None:
+            try:
+                MarkerStyle(fiducial_marker)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Invalid fiducial marker: {fiducial_marker!r}."
+                ) from exc
+
         inlier_mask = np.asarray(
             result.inlier_mask,
             dtype=bool,
@@ -373,6 +395,10 @@ class AlignmentVisualizer:
         transformed_references = None
         if reference_points is not None:
             transformed_references = reference_points @ R.T + translation
+
+        transformed_fiducials = None
+        if fiducial_points is not None:
+            transformed_fiducials = fiducial_points @ R.T + translation
 
         leveled_inliers = leveled_points[inlier_mask]
 
@@ -485,6 +511,15 @@ class AlignmentVisualizer:
             ref_y = transformed_references[:, 1]
             ref_z = transformed_references[:, 2]
 
+        fid_x = np.empty(0, dtype=float)
+        fid_y = np.empty(0, dtype=float)
+        fid_z = np.empty(0, dtype=float)
+
+        if transformed_fiducials is not None:
+            fid_x = transformed_fiducials[:, 0]
+            fid_y = transformed_fiducials[:, 1]
+            fid_z = transformed_fiducials[:, 2]
+
         # ==============================================================
         # Fitted-plane footprint
         # ==============================================================
@@ -546,6 +581,18 @@ class AlignmentVisualizer:
         )
 
         residual_colorbar.set_label("Signed distance to fitted plane [mm]")
+
+        if transformed_fiducials is not None:
+            ax_top.scatter(
+                fid_x,
+                fid_y,
+                marker=fiducial_marker,
+                s=65,
+                color="magenta",
+                linewidths=1.2,
+                label="Fiducials",
+                zorder=3,
+            )
 
         if transformed_references is not None:
             ax_top.scatter(
@@ -716,6 +763,18 @@ class AlignmentVisualizer:
             zorder=2,
         )
 
+        if transformed_fiducials is not None:
+            ax_side_x.scatter(
+                fid_x,
+                fid_z,
+                marker=fiducial_marker,
+                s=50,
+                color="magenta",
+                linewidths=1.2,
+                label="Fiducials",
+                zorder=3,
+            )
+
         if transformed_references is not None:
             ax_side_x.scatter(
                 ref_x,
@@ -810,6 +869,18 @@ class AlignmentVisualizer:
             label="Point cloud",
             zorder=2,
         )
+
+        if transformed_fiducials is not None:
+            ax_side_y.scatter(
+                fid_y,
+                fid_z,
+                marker=fiducial_marker,
+                s=50,
+                color="magenta",
+                linewidths=1.2,
+                label="Fiducials",
+                zorder=3,
+            )
 
         if transformed_references is not None:
             ax_side_y.scatter(

@@ -27,7 +27,17 @@ def segment_ladder(
 ) -> list[SensorPointCloud]:
 
     z_gap_mm = float(config.get("z_gap_mm", 0.7))
-    min_points = int(config.get("min_points_per_sensor", 100))
+    if "min_points_per_sensor" in config and "min_point_per_sensor" in config:
+        raise ValueError(
+            "Use only one of 'min_points_per_sensor' or its singular alias "
+            "'min_point_per_sensor'."
+        )
+    min_points = int(
+        config.get(
+            "min_points_per_sensor",
+            config.get("min_point_per_sensor", 100),
+        )
+    )
     y_center_cfg = config.get("y_center_mm")
     
     if y_center_cfg is None:

@@ -174,6 +174,7 @@ class LadderVisualizer:
         results: Iterable[SensorPlaneResult],
         output_dir: str | Path,
         *,
+        filename_prefix: str = "",
         residual_percentile: float = 99.0,
         show_outliers: bool = False,
         point_size: float = 2.0,
@@ -245,7 +246,8 @@ class LadderVisualizer:
             fig.tight_layout()
 
             path = output_dir / (
-                f"sensor_{self._safe_name(result.name)}_plane_residuals.png"
+                f"{filename_prefix}sensor_{self._safe_name(result.name)}"
+                "_plane_residuals.png"
             )
             fig.savefig(
                 path,

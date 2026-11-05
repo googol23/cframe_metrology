@@ -24,3 +24,18 @@ def test_streaming_transform_preserves_extra_columns(tmp_path: Path):
     loader = AsciiPointCloudLoader()
     loader.transform_file_streaming(src, dst, np.eye(3), np.array([1.0, -1.0, 2.0]))
     assert dst.read_text(encoding="utf-8") == "// h\n2.000000 1.000000 5.000000 99\n"
+
+
+def test_auto_delimiter_accepts_comma_whitespace_and_repeated_points(tmp_path: Path):
+    src = tmp_path / "fiducials.xyz"
+    src.write_text(
+        "1,2,3\n1,2,3\n4 5 6\n7\t8\t9\n",
+        encoding="utf-8",
+    )
+
+    data = AsciiPointCloudLoader(delimiter="auto").load(src)
+
+    np.testing.assert_allclose(
+        data.points,
+        [[1, 2, 3], [1, 2, 3], [4, 5, 6], [7, 8, 9]],
+    )

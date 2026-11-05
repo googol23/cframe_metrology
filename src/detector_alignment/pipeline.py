@@ -5,10 +5,9 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import yaml
 from scipy.spatial.transform import Rotation
+import yaml
 
-from .segmentation import segment_ladder
 from .io import AsciiPointCloudLoader
 from .ladder import LadderProcessor, SensorPlaneResult
 from .ladder_viz import LadderVisualizer
@@ -16,7 +15,11 @@ from .math3d import homogeneous
 from .models import AlignmentResult
 from .plane import RobustPlaneFitter
 from .reference import MeasuredReferenceProcessor, MeasuredReferenceResult
-from .uncertainty import build_joint_covariance, propagate_final_transform_covariance
+from .segmentation import segment_ladder
+from .uncertainty import (
+    build_joint_covariance,
+    propagate_final_transform_covariance,
+)
 from .viz import AlignmentVisualizer
 
 
@@ -47,6 +50,23 @@ class AlignmentPipeline:
     the output root.
     """
 
+    _LADDER_GLOBAL_KEYS = frozenset(
+        {
+            "enabled",
+            "sensor_plane_fit",
+            "visualization",
+            "write_individual_plots",
+        }
+    )
+    _LEGACY_SINGLE_LADDER_KEYS = frozenset(
+        {
+            "segmentation",
+            "sensors",
+            "file",
+            "uncertainty",
+        }
+    )
+
     def __init__(self, config: dict):
         if not isinstance(config, dict):
             raise TypeError("config must be a mapping.")
@@ -55,9 +75,14 @@ class AlignmentPipeline:
         logger.debug("Initialising AlignmentPipeline.")
 
         io_cfg = config.get("io", {})
+        comment_prefixes = io_cfg.get("comment_prefixes", ["#", "//", "$"])
         self.loader = AsciiPointCloudLoader(
-            comment_prefixes=io_cfg.get("comment_prefixes", ["#", "//", "$"]),
+            comment_prefixes=comment_prefixes,
             delimiter=io_cfg.get("delimiter", None),
+        )
+        self.fiducial_loader = AsciiPointCloudLoader(
+            comment_prefixes=comment_prefixes,
+            delimiter="auto",
         )
 
         p_cfg = config.get("plane_fit", {})
@@ -83,7 +108,14 @@ class AlignmentPipeline:
         )
 
         ladder_cfg = config.get("ladder_analysis", {})
+        if ladder_cfg is None:
+            ladder_cfg = {}
+        if not isinstance(ladder_cfg, dict):
+            raise ValueError("'ladder_analysis' must be a YAML mapping.")
+
         sensor_fit_cfg = ladder_cfg.get("sensor_plane_fit", {})
+        if not isinstance(sensor_fit_cfg, dict):
+            raise ValueError("'ladder_analysis.sensor_plane_fit' must be a mapping.")
         self.sensor_plane_fitter = RobustPlaneFitter(
             ransac_iterations=sensor_fit_cfg.get(
                 "ransac_iterations",
@@ -99,11 +131,13 @@ class AlignmentPipeline:
             ),
         )
 
-        # LadderProcessor is intentionally NOT constructed here. The final
-        # C-frame transformation does not exist until run() reaches step 3.
-        self.ladder_processor: LadderProcessor | None = None
+        # LadderProcessor instances are intentionally NOT constructed here. The
+        # final C-frame transformation does not exist until run() reaches step 3.
+        self.ladder_processors: dict[str, LadderProcessor] = {}
 
         ladder_viz_cfg = ladder_cfg.get("visualization", {})
+        if not isinstance(ladder_viz_cfg, dict):
+            raise ValueError("'ladder_analysis.visualization' must be a mapping.")
         self.ladder_visualizer = LadderVisualizer(
             dpi=ladder_viz_cfg.get("dpi", v_cfg.get("dpi", 600)),
             sample_size=ladder_viz_cfg.get(
@@ -116,12 +150,101 @@ class AlignmentPipeline:
             ),
         )
 
-        if ladder_cfg.get("enabled", False):
-            mode = ladder_cfg.get("segmentation", {}).get("mode")
+        ladder_configs = self._ladder_configs()
+        if ladder_configs:
             logger.info(
-                "Ladder analysis enabled with segmentation mode '%s'.",
-                mode,
+                "Ladder analysis enabled for %d ladder(s): %s.",
+                len(ladder_configs),
+                ", ".join(name for name, _ in ladder_configs),
             )
+
+    def _ladder_configs(self) -> list[tuple[str, dict]]:
+        """Return validated ``(ladder_name, config)`` pairs in YAML order."""
+        cfg = self.config.get("ladder_analysis")
+        if cfg is None:
+            return []
+        if not isinstance(cfg, dict):
+            raise ValueError("'ladder_analysis' must be a YAML mapping.")
+
+        enabled = cfg.get("enabled", False)
+        if not isinstance(enabled, bool):
+            raise ValueError("'ladder_analysis.enabled' must be true or false.")
+        if not enabled:
+            return []
+
+        legacy_keys = sorted(self._LEGACY_SINGLE_LADDER_KEYS.intersection(cfg))
+        if legacy_keys:
+            keys = ", ".join(repr(key) for key in legacy_keys)
+            raise ValueError(
+                "ladder_analysis must contain named ladder mappings. Move the "
+                f"legacy top-level key(s) {keys} under a ladder name."
+            )
+
+        ladder_configs: list[tuple[str, dict]] = []
+        output_prefixes: dict[str, str] = {}
+
+        for raw_name, ladder_cfg in cfg.items():
+            if raw_name in self._LADDER_GLOBAL_KEYS:
+                continue
+            if not isinstance(raw_name, str) or not raw_name.strip():
+                raise ValueError("Every ladder name must be a non-empty string.")
+            if raw_name != raw_name.strip():
+                raise ValueError(
+                    f"Ladder name {raw_name!r} must not have leading or trailing "
+                    "whitespace."
+                )
+            if not isinstance(ladder_cfg, dict):
+                raise ValueError(
+                    f"ladder_analysis.{raw_name} must be a YAML mapping."
+                )
+
+            segmentation = ladder_cfg.get("segmentation")
+            if not isinstance(segmentation, dict):
+                raise ValueError(
+                    f"ladder_analysis.{raw_name}.segmentation must be a mapping."
+                )
+            mode = segmentation.get("mode")
+            if mode not in {"segmented_files", "automatic"}:
+                raise ValueError(
+                    f"Unknown segmentation mode {mode!r} for ladder {raw_name!r}. "
+                    "Expected 'segmented_files' or 'automatic'."
+                )
+            if mode == "segmented_files":
+                sensors = ladder_cfg.get("sensors")
+                if not isinstance(sensors, list) or not sensors:
+                    raise ValueError(
+                        f"ladder_analysis.{raw_name}.sensors must be a non-empty "
+                        "list in segmented_files mode."
+                    )
+            else:
+                if not ladder_cfg.get("file"):
+                    raise ValueError(
+                        f"ladder_analysis.{raw_name}.file is required in automatic mode."
+                    )
+                segmentation_options = segmentation.get("config", {})
+                if not isinstance(segmentation_options, dict):
+                    raise ValueError(
+                        f"ladder_analysis.{raw_name}.segmentation.config must be "
+                        "a mapping."
+                    )
+
+            safe_prefix = LadderVisualizer._safe_name(raw_name)
+            collision_key = safe_prefix.casefold()
+            previous_name = output_prefixes.get(collision_key)
+            if previous_name is not None:
+                raise ValueError(
+                    f"Ladder names {previous_name!r} and {raw_name!r} produce "
+                    f"colliding output prefix {safe_prefix!r}."
+                )
+            output_prefixes[collision_key] = raw_name
+            ladder_configs.append((raw_name, ladder_cfg))
+
+        if not ladder_configs:
+            raise ValueError(
+                "Enabled ladder_analysis requires at least one named ladder mapping."
+            )
+
+        return ladder_configs
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "AlignmentPipeline":
@@ -142,6 +265,21 @@ class AlignmentPipeline:
         if path.is_absolute():
             return path
         return Path(self.config.get("_config_dir", ".")) / path
+
+    def _fiducials_config(self) -> dict | None:
+        cfg = self.config.get("fiducials")
+        if cfg is None:
+            return None
+        if not isinstance(cfg, dict):
+            raise ValueError("fiducials must be a mapping.")
+        if "file" not in cfg:
+            raise ValueError("fiducials.file is required when fiducials are configured.")
+        if "draw" in cfg and not isinstance(cfg["draw"], bool):
+            raise ValueError("fiducials.draw must be true or false.")
+        marker = cfg.get("marker", "x")
+        if not isinstance(marker, str) or not marker:
+            raise ValueError("fiducials.marker must be a non-empty marker string.")
+        return cfg
 
     def _reference_config(self) -> list[dict]:
         has_references = "references" in self.config
@@ -302,6 +440,17 @@ class AlignmentPipeline:
             cframe.covariances,
         )
 
+        fiducials_cfg = self._fiducials_config()
+        fiducial_points = None
+        fiducial_marker = "x"
+        if fiducials_cfg is not None:
+            fiducials_path = self._resolve(fiducials_cfg["file"])
+            logger.info("Loading C-frame fiducials: %s", fiducials_path)
+            fiducials = self.fiducial_loader.load(fiducials_path)
+            fiducial_marker = fiducials_cfg.get("marker", "x")
+            if fiducials_cfg.get("draw", True):
+                fiducial_points = fiducials.points
+
         # 2. Measured references
         reference_cfg = self._reference_config()
         logger.info(
@@ -329,6 +478,8 @@ class AlignmentPipeline:
             plane,
             cframe_plane_plot,
             reference_points=scanner_reference_points,
+            fiducial_points=fiducial_points,
+            fiducial_marker=fiducial_marker,
         )
 
         # 3. Final scanner -> detector transformation
@@ -369,13 +520,15 @@ class AlignmentPipeline:
             final_plot,
             translation=t,
             reference_points=scanner_reference_points,
+            fiducial_points=fiducial_points,
+            fiducial_marker=fiducial_marker,
             title="C-frame final alignment",
         )
 
         # 4. Ladder/sensor analysis. The final C-frame result is passed into
         # LadderProcessor; the pipeline does not transform ladder clouds itself.
         logger.info("Step 4/5: checking ladder-analysis configuration.")
-        sensor_results = self._process_ladder(
+        ladder_results = self._process_ladders(
             alignment=result,
             images_dir=images_dir,
             uncertainty_default=uncertainty_default,
@@ -390,7 +543,7 @@ class AlignmentPipeline:
             result,
             outdir,
             matrices_dir,
-            sensor_results=sensor_results,
+            ladder_results=ladder_results,
         )
 
         # transformed point clouds -> output/point_clouds/
@@ -402,122 +555,123 @@ class AlignmentPipeline:
         logger.info("Detector-alignment pipeline completed successfully.")
         return result
 
-    def _process_ladder(
+    def _process_ladders(
         self,
         alignment: AlignmentResult,
         images_dir: Path,
         uncertainty_default: dict,
-    ) -> list[SensorPlaneResult]:
-        """
-        Process optional ladder sensor data.
+    ) -> dict[str, list[SensorPlaneResult]]:
+        """Process every configured ladder independently."""
+        ladder_configs = self._ladder_configs()
+        if not ladder_configs:
+            logger.info("Ladder analysis disabled or not configured; skipping.")
+            return {}
 
-        The final C-frame AlignmentResult is injected into LadderProcessor here.
-        Therefore all ladder/sensor input files are transformed during loading,
-        before caching and, in automatic mode, before segmentation.
-
-        All ladder/sensor diagnostic figures are written to images_dir.
-        """
-        cfg = self.config.get("ladder_analysis")
-
-        if cfg is None:
-            logger.info(
-                "No ladder_analysis block found; skipping ladder analysis."
-            )
-            return []
-        if not isinstance(cfg, dict):
-            raise ValueError("'ladder_analysis' must be a YAML mapping.")
-        if not cfg.get("enabled", False):
-            logger.info("Ladder analysis disabled; skipping.")
-            return []
-
-        segmentation_cfg = cfg.get("segmentation", {})
-        mode = segmentation_cfg.get("mode")
-        logger.info(
-            "Starting ladder analysis using segmentation mode '%s'.",
-            mode,
-        )
-
-        # Construct the processor only after the final C-frame transform exists.
-        self.ladder_processor = LadderProcessor(
-            loader=self.loader,
-            plane_fitter=self.sensor_plane_fitter,
-            resolve_path=self._resolve,
-            automatic_segmenter=segment_ladder,
-            transformation=alignment,
-        )
-
-        # get_sensor_clouds() returns detector-frame clouds in BOTH modes.
-        # In automatic mode the full ladder cloud is transformed before the
-        # automatic segmenter sees it.
-        sensors = self.ladder_processor.get_sensor_clouds(
-            cfg,
-            default_uncertainty=uncertainty_default,
-        )
-
-        logger.info(
-            "Sensor segmentation/loading complete: %d sensor cloud(s).",
-            len(sensors),
-        )
-        for sensor in sensors:
-            logger.info(
-                "  Sensor %s: %d points%s",
-                sensor.name,
-                len(sensor.points),
-                (
-                    f", source={sensor.source}"
-                    if sensor.source is not None
-                    else ""
-                ),
-            )
-
-        # No transform_sensors() call here. Applying the transform again would
-        # double-transform the clouds.
-        logger.info("Fitting one plane per sensor in detector coordinates.")
-        results = self.ladder_processor.fit_sensor_planes(sensors)
-
-        for sensor_result in results:
-            residuals = sensor_result.residuals_mm
-            logger.info(
-                "  Sensor %s plane fit: RMS=%.6f mm (%.3f µm), "
-                "inliers=%d/%d, max|residual|=%.6f mm",
-                sensor_result.name,
-                sensor_result.plane.rms_mm,
-                sensor_result.plane.rms_mm * 1000.0,
-                int(np.count_nonzero(sensor_result.plane.inlier_mask)),
-                len(sensor_result.points),
-                float(np.max(np.abs(residuals))),
-            )
-
+        cfg = self.config["ladder_analysis"]
         viz_cfg = cfg.get("visualization", {})
         residual_percentile = float(
             viz_cfg.get("residual_percentile", 99.0)
         )
         show_outliers = bool(viz_cfg.get("show_outliers", False))
         point_size = float(viz_cfg.get("point_size", 2.0))
+        write_individual_plots = cfg.get("write_individual_plots", True)
+        if not isinstance(write_individual_plots, bool):
+            raise ValueError(
+                "'ladder_analysis.write_individual_plots' must be true or false."
+            )
 
-        combined_plot = images_dir / "ladder_sensor_plane_residuals.png"
-        self.ladder_visualizer.plot_combined_residuals(
-            results,
-            combined_plot,
-            residual_percentile=residual_percentile,
-            use_inliers_for_scale=bool(
-                viz_cfg.get("use_inliers_for_scale", True)
-            ),
-            show_outliers=show_outliers,
-            point_size=point_size,
-        )
+        self.ladder_processors.clear()
+        ladder_results: dict[str, list[SensorPlaneResult]] = {}
 
-        if cfg.get("write_individual_plots", True):
-            self.ladder_visualizer.plot_individual_residuals(
+        for ladder_name, ladder_cfg in ladder_configs:
+            mode = ladder_cfg["segmentation"]["mode"]
+            logger.info(
+                "Starting analysis for ladder %s using segmentation mode '%s'.",
+                ladder_name,
+                mode,
+            )
+
+            processor = LadderProcessor(
+                loader=self.loader,
+                plane_fitter=self.sensor_plane_fitter,
+                resolve_path=self._resolve,
+                automatic_segmenter=segment_ladder,
+                transformation=alignment,
+            )
+            self.ladder_processors[ladder_name] = processor
+
+            # Clouds are transformed to detector coordinates in both modes. In
+            # automatic mode this occurs before the segmenter sees the cloud.
+            sensors = processor.get_sensor_clouds(
+                ladder_cfg,
+                default_uncertainty=uncertainty_default,
+            )
+            logger.info(
+                "Ladder %s segmentation/loading complete: %d sensor cloud(s).",
+                ladder_name,
+                len(sensors),
+            )
+            for sensor in sensors:
+                logger.info(
+                    "  Sensor %s: %d points%s",
+                    sensor.name,
+                    len(sensor.points),
+                    (
+                        f", source={sensor.source}"
+                        if sensor.source is not None
+                        else ""
+                    ),
+                )
+
+            logger.info(
+                "Fitting one plane per sensor for ladder %s in detector coordinates.",
+                ladder_name,
+            )
+            results = processor.fit_sensor_planes(sensors)
+            ladder_results[ladder_name] = results
+
+            for sensor_result in results:
+                residuals = sensor_result.residuals_mm
+                logger.info(
+                    "  Sensor %s plane fit: RMS=%.6f mm (%.3f µm), "
+                    "inliers=%d/%d, max|residual|=%.6f mm",
+                    sensor_result.name,
+                    sensor_result.plane.rms_mm,
+                    sensor_result.plane.rms_mm * 1000.0,
+                    int(np.count_nonzero(sensor_result.plane.inlier_mask)),
+                    len(sensor_result.points),
+                    float(np.max(np.abs(residuals))),
+                )
+
+            output_prefix = LadderVisualizer._safe_name(ladder_name)
+            combined_plot = (
+                images_dir
+                / f"{output_prefix}_ladder_sensor_plane_residuals.png"
+            )
+            self.ladder_visualizer.plot_combined_residuals(
                 results,
-                images_dir,
+                combined_plot,
                 residual_percentile=residual_percentile,
+                use_inliers_for_scale=bool(
+                    viz_cfg.get("use_inliers_for_scale", True)
+                ),
                 show_outliers=show_outliers,
                 point_size=point_size,
             )
 
-        logger.info("Ladder sensor analysis completed.")
-        return results
+            if write_individual_plots:
+                self.ladder_visualizer.plot_individual_residuals(
+                    results,
+                    images_dir,
+                    filename_prefix=f"{output_prefix}_",
+                    residual_percentile=residual_percentile,
+                    show_outliers=show_outliers,
+                    point_size=point_size,
+                )
+
+            logger.info("Ladder %s sensor analysis completed.", ladder_name)
+
+        return ladder_results
 
     def _transform_outputs(
         self,
@@ -532,43 +686,63 @@ class AlignmentPipeline:
         This output-writing operation is independent of LadderProcessor's
         in-memory transformed cache.
         """
-        files: list[str | Path] = [self.config["cframe"]["file"]]
-        files.extend(ref["file"] for ref in self._reference_config())
+        files: list[tuple[str | Path, str | None]] = [
+            (self.config["cframe"]["file"], None)
+        ]
+        files.extend((ref["file"], None) for ref in self._reference_config())
+
+        fiducials_cfg = self._fiducials_config()
+        fiducials_path = None
+        if fiducials_cfg is not None:
+            files.append((fiducials_cfg["file"], None))
+            fiducials_path = self._resolve(fiducials_cfg["file"]).resolve()
 
         files.extend(
-            item["file"] if isinstance(item, dict) else item
+            (
+                item["file"] if isinstance(item, dict) else item,
+                None,
+            )
             for item in self.config.get("ladder_files", [])
         )
 
-        ladder_cfg = self.config.get("ladder_analysis")
-        if isinstance(ladder_cfg, dict) and ladder_cfg.get("enabled", False):
-            segmentation_cfg = ladder_cfg.get("segmentation", {})
-            mode = segmentation_cfg.get("mode")
-
+        for ladder_name, ladder_cfg in self._ladder_configs():
+            output_prefix = LadderVisualizer._safe_name(ladder_name)
+            mode = ladder_cfg["segmentation"]["mode"]
             if mode == "segmented_files":
                 for sensor_cfg in ladder_cfg.get("sensors", []):
                     if isinstance(sensor_cfg, dict) and sensor_cfg.get("file"):
-                        files.append(sensor_cfg["file"])
-            elif mode == "automatic":
-                if ladder_cfg.get("file"):
-                    files.append(ladder_cfg["file"])
+                        files.append((sensor_cfg["file"], output_prefix))
+            elif ladder_cfg.get("file"):
+                files.append((ladder_cfg["file"], output_prefix))
 
-        seen: set[str] = set()
-        unique_files: list[Path] = []
+        seen: set[tuple[str, str | None]] = set()
+        unique_files: list[tuple[Path, str | None]] = []
 
-        for value in files:
+        for value, output_prefix in files:
             src = self._resolve(value)
-            key = str(src.resolve())
+            key = (str(src.resolve()), output_prefix)
             if key in seen:
                 continue
             seen.add(key)
-            unique_files.append(src)
+            unique_files.append((src, output_prefix))
 
-        for src in unique_files:
+        for src, output_prefix in unique_files:
             suffix = src.suffix or ".xyz"
-            dst = point_clouds_dir / f"{src.stem}_transformed{suffix}"
+            output_stem = src.stem
+            if output_prefix is not None:
+                normalized_stem = output_stem.casefold()
+                normalized_prefix = output_prefix.casefold()
+                if normalized_stem != normalized_prefix and not normalized_stem.startswith(
+                    f"{normalized_prefix}_"
+                ):
+                    output_stem = f"{output_prefix}_{output_stem}"
+            dst = point_clouds_dir / f"{output_stem}_transformed{suffix}"
 
-            self.loader.transform_file_streaming(
+            transformer = self.loader
+            if fiducials_path is not None and src.resolve() == fiducials_path:
+                transformer = self.fiducial_loader
+
+            transformer.transform_file_streaming(
                 src,
                 dst,
                 result.rotation,
@@ -600,7 +774,7 @@ class AlignmentPipeline:
         result: AlignmentResult,
         outdir: Path,
         matrices_dir: Path,
-        sensor_results: list[SensorPlaneResult] | None = None,
+        ladder_results: dict[str, list[SensorPlaneResult]] | None = None,
     ) -> None:
         """
         Save numerical alignment products.
@@ -720,13 +894,17 @@ class AlignmentPipeline:
             "reference_spacing_check": spacing,
         }
 
-        if sensor_results:
-            ladder_cfg = self.config.get("ladder_analysis", {})
-            segmentation_cfg = ladder_cfg.get("segmentation", {})
-            payload["ladder"] = {
-                "segmentation_mode": segmentation_cfg.get("mode"),
-                "sensor_count": len(sensor_results),
-                "sensors": LadderProcessor.results_summary(sensor_results),
+        if ladder_results:
+            ladder_configs = dict(self._ladder_configs())
+            payload["ladders"] = {
+                ladder_name: {
+                    "segmentation_mode": ladder_configs[ladder_name][
+                        "segmentation"
+                    ]["mode"],
+                    "sensor_count": len(sensor_results),
+                    "sensors": LadderProcessor.results_summary(sensor_results),
+                }
+                for ladder_name, sensor_results in ladder_results.items()
             }
 
         # results.json intentionally remains directly in the output root.

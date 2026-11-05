@@ -343,7 +343,7 @@ class LadderProcessor:
             filename = ladder_config.get("file")
             if not filename:
                 raise ValueError(
-                    "automatic ladder segmentation requires 'ladder_analysis.file'."
+                    "automatic ladder segmentation requires a ladder 'file' entry."
                 )
             return self.load_and_segment_automatically(
                 filename=filename,

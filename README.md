@@ -270,6 +270,23 @@ io:
 
 The default parser therefore accepts whitespace-separated ASCII measurements while ignoring configured header/comment lines.
 
+### Optional C-frame fiducials
+
+A separate file containing measured C-frame fiducial points can be configured as:
+
+```yaml
+fiducials:
+  file: data/cframe_fiducials.xyz
+  draw: true
+  marker: "x"
+```
+
+The fiducial file contains at least three numerical `X`, `Y`, and `Z` columns in the same scanner coordinate system as the C-frame point cloud. Its rows may be comma-separated or separated by spaces/tabs; this detection is independent of the global `io.delimiter` setting. Repeated rows are preserved as distinct measurements and are not averaged or deduplicated.
+
+The file is loaded whenever the `fiducials` section is present. The final scanner-to-detector transformation is applied when the transformed copy is written to `output/point_clouds/cframe_fiducials_transformed.xyz`. When `draw` is `true` (the default), the fiducials are also transformed with the same rotation and translation used for each C-frame diagnostic and overlaid on both the plane-leveling and final-alignment figures. Set `draw: false` to disable only the overlay; loading and transformed output remain enabled.
+
+`marker` accepts a Matplotlib marker string. Common choices include `"x"`, `"+"`, `"o"`, `"^"`, `"s"`, `"D"`, and `"*"`; its default is `"x"`.
+
 ---
 
 ## 9. C-frame reference plane
@@ -532,7 +549,14 @@ Enable it with:
 ```yaml
 ladder_analysis:
   enabled: true
+
+  L3DL0:
+    segmentation:
+      mode: automatic
+    file: data/L3DL0.txt
 ```
+
+Every key below `ladder_analysis` other than the shared options (`enabled`, `sensor_plane_fit`, `visualization`, and `write_individual_plots`) is a ladder name. At least one named ladder is required when analysis is enabled. Each ladder has its own segmentation mode and input files, so automatic and pre-segmented inputs can be mixed in one run. The former single-ladder shape, with `segmentation`, `file`, or `sensors` directly below `ladder_analysis`, is rejected.
 
 The C-frame alignment is always solved first.
 
@@ -586,27 +610,29 @@ Example:
 ladder_analysis:
   enabled: true
 
-  segmentation:
-    mode: automatic
-    config:
-      z_gap_mm: 0.3
-      min_points_per_sensor: 50
-
-  file: data/L1.txt
+  L3DL0:
+    segmentation:
+      mode: automatic
+      config:
+        z_gap_mm: 0.3
+        min_points_per_sensor: 50
+    file: data/L3DL0.txt
 ```
 
 An optional detector-frame `Y` center can also be supplied:
 
 ```yaml
-segmentation:
-  mode: automatic
-  config:
-    z_gap_mm: 0.3
-    y_center_mm: 0.0
-    min_points_per_sensor: 50
+L3DL0:
+  segmentation:
+    mode: automatic
+    config:
+      z_gap_mm: 0.3
+      y_center_mm: 0.0
+      min_points_per_sensor: 50
+  file: data/L3DL0.txt
 ```
 
-If `y_center_mm` is omitted, the current implementation estimates it from the median detector-frame `Y` coordinate of the ladder cloud.
+If `y_center_mm` is omitted, the current implementation estimates it from the median detector-frame `Y` coordinate of the ladder cloud. The canonical minimum-size key is `min_points_per_sensor`; the singular spelling `min_point_per_sensor` is also accepted for compatibility with existing configurations, but both must not be specified together.
 
 ### Current segmentation algorithm
 
@@ -661,24 +687,19 @@ Example:
 ladder_analysis:
   enabled: true
 
-  segmentation:
-    mode: segmented_files
+  L3DL1:
+    segmentation:
+      mode: segmented_files
 
-  sensors:
-    - name: S0
-      file: data/L1_000000.txt
+    sensors:
+      - name: L1T0
+        file: data/L1T0.txt
 
-    - name: S1
-      file: data/L1_000001.txt
-
-    - name: S2
-      file: data/L1_000002.txt
-
-    - name: S3
-      file: data/L1_000003.txt
+      - name: L1T1
+        file: data/L1T1.txt
 ```
 
-Sensor names must be unique.
+Sensor names must be unique within their ladder. The same automatically generated sensor names (such as `S0`) may occur in different ladders because results remain grouped by ladder.
 
 The input files should remain in the **original scanner coordinate system**.
 
@@ -844,20 +865,23 @@ residual_um = 1000 * residual_mm
 
 The combined ladder visualization preserves the detector-coordinate positions of all sensor clouds while colouring each point according to its deviation from the plane fitted to its own sensor.
 
-The principal output is:
+Each ladder produces its own combined residual map, prefixed by its configured ladder name:
 
 ```text
-ladder_sensor_plane_residuals.png
+L3DL0_ladder_sensor_plane_residuals.png
+L3DL1_ladder_sensor_plane_residuals.png
 ```
 
-Individual sensor plots can also be produced:
+Individual sensor plots receive the same prefix:
 
 ```text
-sensor_S0_plane_residuals.png
-sensor_S1_plane_residuals.png
-sensor_S2_plane_residuals.png
+L3DL0_sensor_S0_plane_residuals.png
+L3DL0_sensor_S1_plane_residuals.png
+L3DL1_sensor_L1T0_plane_residuals.png
 ...
 ```
+
+Characters that are unsafe in filenames are replaced with `_`. Ladder names that would produce the same sanitized output prefix are rejected.
 
 ---
 
@@ -912,6 +936,12 @@ uncertainty:
 cframe:
   file: data/c_frame_facet.txt
 
+# Optional measured fiducials in the same scanner coordinate system.
+fiducials:
+  file: data/cframe_fiducials.xyz
+  draw: true
+  marker: "x"
+
 plane_fit:
   ransac_iterations: 600
   ransac_threshold_mm: 0.05
@@ -936,14 +966,23 @@ visualization:
 ladder_analysis:
   enabled: true
 
-  segmentation:
-    mode: automatic
-    config:
-      z_gap_mm: 0.3
-      # y_center_mm: 0.0
-      min_points_per_sensor: 50
+  L3DL0:
+    segmentation:
+      mode: automatic
+      config:
+        z_gap_mm: 0.3
+        # y_center_mm: 0.0
+        min_points_per_sensor: 50
+    file: data/L3DL0.txt
 
-  file: data/L1.txt
+  L3DL1:
+    segmentation:
+      mode: segmented_files
+    sensors:
+      - name: L1T0
+        file: data/L1T0.txt
+      - name: L1T1
+        file: data/L1T1.txt
 
   sensor_plane_fit:
     ransac_iterations: 600
@@ -1007,31 +1046,33 @@ Associated top-view and residual diagnostics may also be produced by the visuali
 
 ## 27. Ladder diagnostics
 
-When ladder analysis is enabled, the pipeline produces the combined sensor residual visualization:
+When ladder analysis is enabled, the pipeline produces one combined sensor residual visualization per configured ladder:
 
 ```text
-ladder_sensor_plane_residuals.png
+<ladder_name>_ladder_sensor_plane_residuals.png
 ```
 
 and, when enabled:
 
 ```text
-sensor_<name>_plane_residuals.png
+<ladder_name>_sensor_<sensor_name>_plane_residuals.png
 ```
 
-for the individual sensors.
+for the individual sensors. `results.json` stores the corresponding numerical summaries under a `ladders` mapping keyed by the configured ladder names; each entry records its segmentation mode, sensor count, and per-sensor results.
 
 ---
 
 ## 28. Transformed point clouds
 
-Configured measurement inputs can be written back in transformed detector coordinates using names of the form:
+Configured measurement inputs, including the optional fiducial file, are written back in transformed detector coordinates using names of the form:
 
 ```text
 *_transformed.xyz
 ```
 
 or with the corresponding original ASCII extension.
+
+Ladder-associated transformed files are prefixed by their configured ladder name to prevent collisions between ladders, unless the source stem already starts with that name. For example, `data/L1T0.txt` under ladder `L3DL1` is written as `L3DL1_L1T0_transformed.txt`, while `data/L3DL0.txt` under ladder `L3DL0` remains `L3DL0_transformed.txt`.
 
 These files are useful for independent inspection of the final detector-frame geometry in point-cloud visualization software.
 

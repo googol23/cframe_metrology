@@ -14,6 +14,14 @@ uncertainty:
 cframe:
   file: data/c_frame_facet.txt
 
+# Optional measured C-frame fiducials. Rows may be comma-, space-, or
+# tab-separated, and repeated measurements are kept as separate points.
+fiducials:
+  file: data/cframe_fiducials.xyz
+  draw: true
+  # Matplotlib marker examples: "x", "+", "o", "^", "s", "D", "*"
+  marker: "x"
+
 plane_fit:
   ransac_iterations: 600
   ransac_threshold_mm: 0.05
@@ -35,40 +43,25 @@ visualization:
   sample_size: 50000
   random_seed: 23
 
-# Optional point clouds that are transformed by the final registration.
+# Optional named ladders transformed by the final registration. Each ladder
+# independently selects automatic segmentation or pre-segmented sensor files.
 ladder_analysis:
   enabled: true
 
-  # segmentation:
-  #   mode: segmented_files
+  L3DL0:
+    segmentation:
+      mode: automatic
+      config:
+        z_gap_mm: 0.3
+        # y_center_mm: 0.0
+        min_points_per_sensor: 50
+    file: data/L3DL0.txt
 
-  # sensors:
-  #   - name: S0
-  #     file: data/L1_000000.txt
-  #   - name: S1
-  #     file: data/L1_000001.txt
-  #   - name: S2
-  #     file: data/L1_000002.txt
-  #   - name: S3
-  #     file: data/L1_000003.txt
-  #   - name: S4
-  #     file: data/L1_000004.txt
-  #   - name: S5
-  #     file: data/L1_000005.txt
-  #   - name: S6
-  #     file: data/L1_000006.txt
-  #   - name: S7
-  #     file: data/L1_000007.txt
-  #   - name: S8
-  #     file: data/L1_000008.txt
-  #   - name: S9
-  #     file: data/L1_000009.txt
-      
-  segmentation:
-    mode: automatic
-    config:
-      z_gap_mm: .3
-      # y_center_mm: 0.0
-      min_points_per_sensor: 50
-  
-  file: data/L1.txt
+  # L3DL1:
+  #   segmentation:
+  #     mode: segmented_files
+  #   sensors:
+  #     - name: L1T0
+  #       file: data/L1T0.txt
+  #     - name: L1T1
+  #       file: data/L1T1.txt

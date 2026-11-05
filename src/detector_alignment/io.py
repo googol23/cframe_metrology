@@ -8,7 +8,11 @@ from .models import PointCloudData
 
 
 class AsciiPointCloudLoader:
-    """ASCII XYZ loader with configurable comments, delimiters and covariance input."""
+    """ASCII XYZ loader with configurable comments, delimiters and covariance input.
+
+    The ``auto`` delimiter accepts comma-separated and whitespace-separated rows,
+    including files that contain both forms.
+    """
 
     def __init__(self, comment_prefixes=("#", "//", "$"), delimiter=None):
         self.comment_prefixes = tuple(comment_prefixes)
@@ -20,6 +24,8 @@ class AsciiPointCloudLoader:
     def _split(self, s: str) -> list[str]:
         if self.delimiter in (None, "whitespace"):
             return s.split()
+        if self.delimiter == "auto":
+            return s.replace(",", " ").split()
         return s.split(self.delimiter)
 
     def load(self, path: str | Path, uncertainty: dict | None = None) -> PointCloudData:
@@ -183,5 +189,5 @@ class AsciiPointCloudLoader:
                     continue
                 out = R @ xyz + t
                 parts[:3] = [fmt.format(v) for v in out]
-                sep = " " if self.delimiter in (None, "whitespace") else self.delimiter
+                sep = " " if self.delimiter in (None, "whitespace", "auto") else self.delimiter
                 fo.write(sep.join(parts) + "\n")
