@@ -200,6 +200,51 @@ def test_fiducial_min_distance_is_required():
         pipeline._fiducials_config()
 
 
+@pytest.mark.parametrize(
+    ("draw_config", "error_match"),
+    [
+        (False, "visualization.draw.*mapping"),
+        ({"cframe": "yes"}, "visualization.draw.cframe.*true or false"),
+        ({"unknown": True}, "Unknown visualization.draw stage"),
+    ],
+)
+def test_visualization_draw_configuration_is_validated(
+    draw_config,
+    error_match: str,
+):
+    with pytest.raises(ValueError, match=error_match):
+        AlignmentPipeline({"visualization": {"draw": draw_config}})
+
+
+@pytest.mark.parametrize(
+    ("draw_sensors", "legacy_write_individual", "expected"),
+    [
+        (None, False, False),
+        (True, False, True),
+        (False, True, False),
+    ],
+)
+def test_sensor_draw_stage_supports_legacy_configuration(
+    draw_sensors: bool | None,
+    legacy_write_individual: bool,
+    expected: bool,
+):
+    visualization = {}
+    if draw_sensors is not None:
+        visualization["draw"] = {"sensors": draw_sensors}
+
+    pipeline = AlignmentPipeline(
+        {
+            "visualization": visualization,
+            "ladder_analysis": {
+                "write_individual_plots": legacy_write_individual,
+            },
+        }
+    )
+
+    assert pipeline.visualization_draw["sensors"] is expected
+
+
 def test_pipeline_processes_named_ladders_with_mixed_segmentation_modes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -374,6 +419,120 @@ def test_pipeline_processes_named_ladders_with_mixed_segmentation_modes(
     point_clouds_dir = tmp_path / "output" / "point_clouds"
     assert (point_clouds_dir / "L3DL0_transformed.xyz").exists()
     assert (point_clouds_dir / "L3DL1_L1T0_transformed.xyz").exists()
+
+
+@pytest.mark.parametrize(
+    ("disabled_stage", "expected_calls", "stale_images"),
+    [
+        (
+            "cframe",
+            {"cframe": 0, "sensors": 1, "full_ladders": 1, "overview": 1},
+            [
+                "cframe_plane_alignment.png",
+                "cframe_plane_alignment_top_view.png",
+                "cframe_final_alignment.png",
+                "cframe_final_alignment_top_view.png",
+            ],
+        ),
+        (
+            "sensors",
+            {"cframe": 2, "sensors": 0, "full_ladders": 1, "overview": 1},
+            ["L3DL0_sensor_S0_plane_residuals.png"],
+        ),
+        (
+            "full_ladders",
+            {"cframe": 2, "sensors": 1, "full_ladders": 0, "overview": 1},
+            ["L3DL0_ladder_sensor_plane_residuals.png"],
+        ),
+        (
+            "all_ladders_and_cframe",
+            {"cframe": 2, "sensors": 1, "full_ladders": 1, "overview": 0},
+            ["cframe_all_ladders_sensor_plane_residuals.png"],
+        ),
+    ],
+)
+def test_pipeline_can_disable_each_visualization_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    disabled_stage: str,
+    expected_calls: dict[str, int],
+    stale_images: list[str],
+):
+    config_path = _write_synthetic_case(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data_dir = tmp_path / "data"
+    scanner_offset = np.asarray([1.0, 2.0, 10.0])
+    detector_sensor = np.asarray(
+        [
+            [-2.0, -3.0, 1.0],
+            [0.0, -3.0, 1.0],
+            [-2.0, -1.0, 1.0],
+            [0.0, -1.0, 1.0],
+        ]
+    )
+    np.savetxt(data_dir / "S0.xyz", detector_sensor + scanner_offset)
+
+    draw = {
+        "cframe": True,
+        "sensors": True,
+        "full_ladders": True,
+        "all_ladders_and_cframe": True,
+    }
+    draw[disabled_stage] = False
+    config["visualization"]["draw"] = draw
+    config["ladder_analysis"] = {
+        "enabled": True,
+        "L3DL0": {
+            "segmentation": {"mode": "segmented_files"},
+            "sensors": [{"name": "S0", "file": "data/S0.xyz"}],
+        },
+        "visualization": {"dpi": 72, "sample_size": 1000},
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    images_dir = tmp_path / "output" / "images"
+    images_dir.mkdir(parents=True)
+    for filename in stale_images:
+        (images_dir / filename).write_text("stale", encoding="utf-8")
+
+    pipeline = AlignmentPipeline.from_yaml(config_path)
+    calls = {stage: 0 for stage in expected_calls}
+
+    def record(stage):
+        def recorder(*args, **kwargs):
+            calls[stage] += 1
+
+        return recorder
+
+    monkeypatch.setattr(
+        pipeline.visualizer,
+        "plot_plane_alignment",
+        record("cframe"),
+    )
+    monkeypatch.setattr(
+        pipeline.ladder_visualizer,
+        "plot_individual_residuals",
+        record("sensors"),
+    )
+    monkeypatch.setattr(
+        pipeline.ladder_visualizer,
+        "plot_combined_residuals",
+        record("full_ladders"),
+    )
+    monkeypatch.setattr(
+        pipeline.ladder_visualizer,
+        "plot_cframe_and_ladder_residuals",
+        record("overview"),
+    )
+
+    pipeline.run()
+
+    assert calls == expected_calls
+    assert all(not (images_dir / filename).exists() for filename in stale_images)
+    payload = json.loads(
+        (tmp_path / "output" / "results.json").read_text(encoding="utf-8")
+    )
+    assert payload["ladders"]["L3DL0"]["sensor_count"] == 1
 
 
 def test_legacy_single_ladder_configuration_is_rejected():

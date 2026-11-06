@@ -45,6 +45,11 @@ visualization:
   dpi: 600
   sample_size: 50000
   random_seed: 23
+  draw:
+    cframe: true
+    sensors: true
+    full_ladders: true
+    all_ladders_and_cframe: true
 
 # Optional named ladders transformed by the final registration. Each ladder
 # independently selects automatic segmentation or pre-segmented sensor files.

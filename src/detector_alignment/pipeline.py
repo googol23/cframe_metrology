@@ -55,6 +55,14 @@ class AlignmentPipeline:
 
     _LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
     _LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+    _VISUALIZATION_DRAW_STAGES = frozenset(
+        {
+            "cframe",
+            "sensors",
+            "full_ladders",
+            "all_ladders_and_cframe",
+        }
+    )
 
     _LADDER_GLOBAL_KEYS = frozenset(
         {
@@ -110,6 +118,27 @@ class AlignmentPipeline:
         )
 
         v_cfg = config.get("visualization", {})
+        if not isinstance(v_cfg, dict):
+            raise ValueError("'visualization' must be a YAML mapping.")
+        draw_cfg = v_cfg.get("draw", {})
+        if not isinstance(draw_cfg, dict):
+            raise ValueError("'visualization.draw' must be a YAML mapping.")
+        unknown_draw_stages = sorted(
+            set(draw_cfg).difference(self._VISUALIZATION_DRAW_STAGES)
+        )
+        if unknown_draw_stages:
+            stages = ", ".join(repr(stage) for stage in unknown_draw_stages)
+            raise ValueError(f"Unknown visualization.draw stage(s): {stages}.")
+        for stage, enabled in draw_cfg.items():
+            if not isinstance(enabled, bool):
+                raise ValueError(
+                    f"'visualization.draw.{stage}' must be true or false."
+                )
+        self.visualization_draw = {
+            stage: draw_cfg.get(stage, True)
+            for stage in self._VISUALIZATION_DRAW_STAGES
+        }
+
         self.visualizer = AlignmentVisualizer(
             dpi=v_cfg.get("dpi", 600),
             sample_size=v_cfg.get("sample_size", 50_000),
@@ -124,6 +153,14 @@ class AlignmentPipeline:
             ladder_cfg = {}
         if not isinstance(ladder_cfg, dict):
             raise ValueError("'ladder_analysis' must be a YAML mapping.")
+
+        write_individual_plots = ladder_cfg.get("write_individual_plots", True)
+        if not isinstance(write_individual_plots, bool):
+            raise ValueError(
+                "'ladder_analysis.write_individual_plots' must be true or false."
+            )
+        if "sensors" not in draw_cfg:
+            self.visualization_draw["sensors"] = write_individual_plots
 
         sensor_fit_cfg = ladder_cfg.get("sensor_plane_fit", {})
         if not isinstance(sensor_fit_cfg, dict):
@@ -213,6 +250,26 @@ class AlignmentPipeline:
             for key, value in details.items()
         )
         self._logger.info("Pipeline | task=%s%s", task, context)
+
+    def _remove_generated_image(self, path: Path) -> None:
+        if path.exists():
+            path.unlink()
+            self._logger.debug("Removed disabled visualization output: %s", path)
+
+    def _remove_cframe_diagnostics(self, images_dir: Path) -> None:
+        for stem in ("cframe_plane_alignment", "cframe_final_alignment"):
+            for suffix in ("", "_top_view", "_residual_histogram"):
+                self._remove_generated_image(images_dir / f"{stem}{suffix}.png")
+
+    def _remove_disabled_ladder_diagnostics(self, images_dir: Path) -> None:
+        if not self.visualization_draw["full_ladders"]:
+            for path in images_dir.glob("*_ladder_sensor_plane_residuals.png"):
+                self._remove_generated_image(path)
+
+        if not self.visualization_draw["sensors"]:
+            for path in images_dir.glob("*_sensor_*_plane_residuals.png"):
+                if not path.name.endswith("_ladder_sensor_plane_residuals.png"):
+                    self._remove_generated_image(path)
 
     def _ladder_configs(self) -> list[tuple[str, dict]]:
         """Return validated ``(ladder_name, config)`` pairs in YAML order."""
@@ -495,6 +552,14 @@ class AlignmentPipeline:
         matrices_dir.mkdir(parents=True, exist_ok=True)
         point_clouds_dir.mkdir(parents=True, exist_ok=True)
 
+        if not self.visualization_draw["cframe"]:
+            self._remove_cframe_diagnostics(images_dir)
+        self._remove_disabled_ladder_diagnostics(images_dir)
+        if not self.visualization_draw["all_ladders_and_cframe"]:
+            self._remove_generated_image(
+                images_dir / "cframe_all_ladders_sensor_plane_residuals.png"
+            )
+
         self._logger.debug("Output root: %s", outdir)
         self._logger.debug("Image output: %s", images_dir)
         self._logger.debug("Matrix output: %s", matrices_dir)
@@ -568,21 +633,24 @@ class AlignmentPipeline:
             [ref.measured_xyz for ref in references]
         )
 
-        cframe_plane_plot = images_dir / "cframe_plane_alignment.png"
-        self._log_task(
-            "write_alignment_diagnostic",
-            stage="plane",
-            destination=cframe_plane_plot,
-        )
-        self.visualizer.plot_plane_alignment(
-            cframe.points,
-            plane.rotation_to_xy,
-            plane,
-            cframe_plane_plot,
-            reference_points=scanner_reference_points,
-            fiducial_points=fiducial_points,
-            fiducial_marker=fiducial_marker,
-        )
+        if self.visualization_draw["cframe"]:
+            cframe_plane_plot = images_dir / "cframe_plane_alignment.png"
+            self._log_task(
+                "write_alignment_diagnostic",
+                stage="plane",
+                destination=cframe_plane_plot,
+            )
+            self.visualizer.plot_plane_alignment(
+                cframe.points,
+                plane.rotation_to_xy,
+                plane,
+                cframe_plane_plot,
+                reference_points=scanner_reference_points,
+                fiducial_points=fiducial_points,
+                fiducial_marker=fiducial_marker,
+            )
+        else:
+            self._logger.debug("C-frame plane diagnostic disabled; skipping.")
 
         # Final scanner -> detector transformation
         self._log_task(
@@ -617,23 +685,26 @@ class AlignmentPipeline:
         if fiducials is not None:
             transformed_fiducials = fiducials.transformed(R, t)
 
-        final_plot = images_dir / "cframe_final_alignment.png"
-        self._log_task(
-            "write_alignment_diagnostic",
-            stage="final",
-            destination=final_plot,
-        )
-        self.visualizer.plot_plane_alignment(
-            cframe.points,
-            R,
-            plane,
-            final_plot,
-            translation=t,
-            reference_points=scanner_reference_points,
-            fiducial_points=fiducial_points,
-            fiducial_marker=fiducial_marker,
-            title="C-frame final alignment",
-        )
+        if self.visualization_draw["cframe"]:
+            final_plot = images_dir / "cframe_final_alignment.png"
+            self._log_task(
+                "write_alignment_diagnostic",
+                stage="final",
+                destination=final_plot,
+            )
+            self.visualizer.plot_plane_alignment(
+                cframe.points,
+                R,
+                plane,
+                final_plot,
+                translation=t,
+                reference_points=scanner_reference_points,
+                fiducial_points=fiducial_points,
+                fiducial_marker=fiducial_marker,
+                title="C-frame final alignment",
+            )
+        else:
+            self._logger.debug("C-frame final diagnostic disabled; skipping.")
 
         # Ladder/sensor analysis. The final C-frame result is passed into
         # LadderProcessor; the pipeline does not transform ladder clouds itself.
@@ -642,12 +713,19 @@ class AlignmentPipeline:
             images_dir=images_dir,
             uncertainty_default=uncertainty_default,
         )
-        if ladder_results:
+        if (
+            ladder_results
+            and self.visualization_draw["all_ladders_and_cframe"]
+        ):
             self._plot_cframe_and_ladder_residuals(
                 cframe.points,
                 alignment=result,
                 ladder_results=ladder_results,
                 images_dir=images_dir,
+            )
+        elif ladder_results:
+            self._logger.debug(
+                "All-ladders and C-frame diagnostic disabled; skipping."
             )
 
         # results.json -> output/
@@ -711,12 +789,6 @@ class AlignmentPipeline:
         )
         show_outliers = bool(viz_cfg.get("show_outliers", False))
         point_size = float(viz_cfg.get("point_size", 2.0))
-        write_individual_plots = cfg.get("write_individual_plots", True)
-        if not isinstance(write_individual_plots, bool):
-            raise ValueError(
-                "'ladder_analysis.write_individual_plots' must be true or false."
-            )
-
         self.ladder_processors.clear()
         ladder_results: dict[str, list[SensorPlaneResult]] = {}
 
@@ -785,18 +857,25 @@ class AlignmentPipeline:
                 images_dir
                 / f"{output_prefix}_ladder_sensor_plane_residuals.png"
             )
-            self.ladder_visualizer.plot_combined_residuals(
-                results,
-                combined_plot,
-                residual_percentile=residual_percentile,
-                use_inliers_for_scale=bool(
-                    viz_cfg.get("use_inliers_for_scale", True)
-                ),
-                show_outliers=show_outliers,
-                point_size=point_size,
-            )
+            if self.visualization_draw["full_ladders"]:
+                self.ladder_visualizer.plot_combined_residuals(
+                    results,
+                    combined_plot,
+                    residual_percentile=residual_percentile,
+                    use_inliers_for_scale=bool(
+                        viz_cfg.get("use_inliers_for_scale", True)
+                    ),
+                    show_outliers=show_outliers,
+                    point_size=point_size,
+                )
+            else:
+                self._remove_generated_image(combined_plot)
+                self._logger.debug(
+                    "Full-ladder diagnostic disabled for %s; skipping.",
+                    ladder_name,
+                )
 
-            if write_individual_plots:
+            if self.visualization_draw["sensors"]:
                 self.ladder_visualizer.plot_individual_residuals(
                     results,
                     images_dir,
@@ -804,6 +883,17 @@ class AlignmentPipeline:
                     residual_percentile=residual_percentile,
                     show_outliers=show_outliers,
                     point_size=point_size,
+                )
+            else:
+                for sensor_result in results:
+                    sensor_name = LadderVisualizer._safe_name(sensor_result.name)
+                    self._remove_generated_image(
+                        images_dir
+                        / f"{output_prefix}_sensor_{sensor_name}_plane_residuals.png"
+                    )
+                self._logger.debug(
+                    "Individual sensor diagnostics disabled for %s; skipping.",
+                    ladder_name,
                 )
 
             self._logger.debug(
