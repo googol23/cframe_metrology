@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import multiprocessing
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -15,7 +18,11 @@ from .fiducials import (
 )
 from .io import AsciiPointCloudLoader
 from .ladder import LadderProcessor, SensorPlaneResult
-from .ladder_viz import LadderVisualizer
+from .ladder_viz import (
+    LadderVisualizer,
+    PreparedIndividualResidualPlot,
+    render_prepared_individual_residual,
+)
 from .math3d import homogeneous
 from .models import AlignmentResult
 from .plane import RobustPlaneFitter
@@ -197,6 +204,24 @@ class AlignmentPipeline:
                 "random_seed",
                 v_cfg.get("random_seed", 42),
             ),
+        )
+
+        requested_plot_workers = ladder_viz_cfg.get(
+            "individual_plot_workers",
+            4,
+        )
+        if (
+            isinstance(requested_plot_workers, bool)
+            or not isinstance(requested_plot_workers, int)
+            or requested_plot_workers <= 0
+        ):
+            raise ValueError(
+                "'ladder_analysis.visualization.individual_plot_workers' "
+                "must be a positive integer."
+            )
+        self.individual_plot_workers = min(
+            requested_plot_workers,
+            os.cpu_count() or 1,
         )
 
         self._ladder_configs()
@@ -648,6 +673,7 @@ class AlignmentPipeline:
                 reference_points=scanner_reference_points,
                 fiducial_points=fiducial_points,
                 fiducial_marker=fiducial_marker,
+                residual_y_legend_location="lower left",
             )
         else:
             self._logger.debug("C-frame plane diagnostic disabled; skipping.")
@@ -702,6 +728,7 @@ class AlignmentPipeline:
                 fiducial_points=fiducial_points,
                 fiducial_marker=fiducial_marker,
                 title="C-frame final alignment",
+                residual_y_legend_location="upper left",
             )
         else:
             self._logger.debug("C-frame final diagnostic disabled; skipping.")
@@ -765,6 +792,86 @@ class AlignmentPipeline:
         )
         return result
 
+    def _render_prepared_individual_plots(
+        self,
+        plots: list[PreparedIndividualResidualPlot],
+        *,
+        point_size: float,
+    ) -> list[Path]:
+        """Render prepared sensor plots with bounded process parallelism."""
+        if not plots:
+            return []
+
+        expected_paths = [plot.output_path for plot in plots]
+        if len(set(expected_paths)) != len(expected_paths):
+            raise ValueError("Individual sensor plot output paths must be unique.")
+
+        worker_count = min(self.individual_plot_workers, len(plots))
+        self._log_task(
+            "write_individual_sensor_diagnostics",
+            count=len(plots),
+            workers=worker_count,
+        )
+
+        if worker_count == 1:
+            written = [
+                render_prepared_individual_residual(
+                    plot,
+                    dpi=self.ladder_visualizer.dpi,
+                    point_size=point_size,
+                )
+                for plot in plots
+            ]
+        else:
+            from .ladder_plot_worker import render_individual_sensor_plot
+
+            previous_backend = os.environ.get("MPLBACKEND")
+            os.environ["MPLBACKEND"] = "Agg"
+            written = []
+            try:
+                with ProcessPoolExecutor(
+                    max_workers=worker_count,
+                    mp_context=multiprocessing.get_context("spawn"),
+                ) as executor:
+                    futures = {
+                        executor.submit(
+                            render_individual_sensor_plot,
+                            plot,
+                            self.ladder_visualizer.dpi,
+                            point_size,
+                        ): plot.output_path
+                        for plot in plots
+                    }
+                    for future in as_completed(futures):
+                        target = futures[future]
+                        try:
+                            written.append(Path(future.result()))
+                        except Exception as exc:
+                            for pending in futures:
+                                pending.cancel()
+                            raise RuntimeError(
+                                "Failed to render individual sensor diagnostic "
+                                f"{target}."
+                            ) from exc
+            finally:
+                if previous_backend is None:
+                    os.environ.pop("MPLBACKEND", None)
+                else:
+                    os.environ["MPLBACKEND"] = previous_backend
+
+        if set(written) != set(expected_paths):
+            raise RuntimeError(
+                "Individual sensor diagnostic outputs did not match the "
+                "prepared output paths."
+            )
+        missing = [path for path in expected_paths if not path.is_file()]
+        if missing:
+            raise RuntimeError(
+                "Individual sensor diagnostics were not written: "
+                + ", ".join(str(path) for path in missing)
+            )
+        return expected_paths
+
     def _process_ladders(
         self,
         alignment: AlignmentResult,
@@ -791,6 +898,7 @@ class AlignmentPipeline:
         point_size = float(viz_cfg.get("point_size", 2.0))
         self.ladder_processors.clear()
         ladder_results: dict[str, list[SensorPlaneResult]] = {}
+        prepared_individual_plots: list[PreparedIndividualResidualPlot] = []
 
         for ladder_name, ladder_cfg in ladder_configs:
             mode = ladder_cfg["segmentation"]["mode"]
@@ -876,14 +984,25 @@ class AlignmentPipeline:
                 )
 
             if self.visualization_draw["sensors"]:
-                self.ladder_visualizer.plot_individual_residuals(
-                    results,
-                    images_dir,
-                    filename_prefix=f"{output_prefix}_",
-                    residual_percentile=residual_percentile,
-                    show_outliers=show_outliers,
-                    point_size=point_size,
-                )
+                if self.individual_plot_workers == 1:
+                    self.ladder_visualizer.plot_individual_residuals(
+                        results,
+                        images_dir,
+                        filename_prefix=f"{output_prefix}_",
+                        residual_percentile=residual_percentile,
+                        show_outliers=show_outliers,
+                        point_size=point_size,
+                    )
+                else:
+                    prepared_individual_plots.extend(
+                        self.ladder_visualizer.prepare_individual_residuals(
+                            results,
+                            images_dir,
+                            filename_prefix=f"{output_prefix}_",
+                            residual_percentile=residual_percentile,
+                            show_outliers=show_outliers,
+                        )
+                    )
             else:
                 for sensor_result in results:
                     sensor_name = LadderVisualizer._safe_name(sensor_result.name)
@@ -899,6 +1018,12 @@ class AlignmentPipeline:
             self._logger.debug(
                 "Ladder %s sensor analysis completed.",
                 ladder_name,
+            )
+
+        if prepared_individual_plots:
+            self._render_prepared_individual_plots(
+                prepared_individual_plots,
+                point_size=point_size,
             )
 
         return ladder_results

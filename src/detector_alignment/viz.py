@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -273,6 +274,10 @@ class AlignmentVisualizer:
         fiducial_points: np.ndarray | None = None,
         fiducial_marker: str = "x",
         title: str = "C-frame plane leveling",
+        residual_y_legend_location: Literal[
+            "lower left",
+            "upper left",
+        ] = "lower left",
     ) -> None:
         """
         Plot the rotated C-frame point cloud using three diagnostic views.
@@ -641,7 +646,7 @@ class AlignmentVisualizer:
         )
 
         ax_top.legend(
-            loc="best",
+            loc="upper right",
             fontsize=8,
         )
 
@@ -846,7 +851,7 @@ class AlignmentVisualizer:
         )
 
         ax_side_x.legend(
-            loc="best",
+            loc="center right",
             fontsize=8,
         )
 
@@ -954,7 +959,7 @@ class AlignmentVisualizer:
         )
 
         ax_side_y.legend(
-            loc="best",
+            loc="center right",
             fontsize=8,
         )
 
@@ -1028,7 +1033,7 @@ class AlignmentVisualizer:
         )
 
         ax_residual_x.legend(
-            loc="best",
+            loc="upper right",
             fontsize=7,
         )
 
@@ -1065,7 +1070,7 @@ class AlignmentVisualizer:
         )
 
         ax_residual_y.legend(
-            loc="best",
+            loc=residual_y_legend_location,
             fontsize=7,
         )
 

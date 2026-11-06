@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -6,6 +7,10 @@ import pytest
 import yaml
 from matplotlib.axes import Axes
 
+import detector_alignment.pipeline as pipeline_module
+from detector_alignment.ladder import SensorPlaneResult
+from detector_alignment.ladder_viz import LadderVisualizer
+from detector_alignment.models import PlaneFitResult
 from detector_alignment.pipeline import AlignmentPipeline
 
 
@@ -135,6 +140,10 @@ def test_pipeline_loads_transforms_and_optionally_draws_fiducials(
     pipeline.run()
 
     assert len(plot_calls) == 2
+    assert [call["residual_y_legend_location"] for call in plot_calls] == [
+        "lower left",
+        "upper left",
+    ]
     for call in plot_calls:
         assert call["fiducial_marker"] == "x"
         if draw:
@@ -192,6 +201,36 @@ def test_pipeline_loads_transforms_and_optionally_draws_fiducials(
     )
 
 
+def test_cframe_diagnostics_use_fixed_legend_locations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = _write_synthetic_case(tmp_path)
+    pipeline = AlignmentPipeline.from_yaml(config)
+    legend_locations = []
+    original_legend = Axes.legend
+
+    def record_legend(axis, *args, **kwargs):
+        legend_locations.append(kwargs.get("loc"))
+        return original_legend(axis, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "legend", record_legend)
+    pipeline.run()
+
+    assert legend_locations == [
+        "upper right",
+        "center right",
+        "center right",
+        "upper right",
+        "lower left",
+        "upper right",
+        "center right",
+        "center right",
+        "upper right",
+        "upper left",
+    ]
+
+
 def test_fiducial_min_distance_is_required():
     pipeline = AlignmentPipeline(
         {"fiducials": {"file": "data/cframe_fiducials.xyz"}}
@@ -214,6 +253,123 @@ def test_visualization_draw_configuration_is_validated(
 ):
     with pytest.raises(ValueError, match=error_match):
         AlignmentPipeline({"visualization": {"draw": draw_config}})
+
+
+@pytest.mark.parametrize(
+    ("configured_workers", "available_cpus", "expected_workers"),
+    [
+        (None, 2, 2),
+        (8, 2, 2),
+        (1, 8, 1),
+        (4, None, 1),
+    ],
+)
+def test_individual_plot_workers_are_capped_by_available_cpus(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_workers: int | None,
+    available_cpus: int | None,
+    expected_workers: int,
+):
+    monkeypatch.setattr(
+        pipeline_module.os,
+        "cpu_count",
+        lambda: available_cpus,
+    )
+    ladder_visualization = {}
+    if configured_workers is not None:
+        ladder_visualization["individual_plot_workers"] = configured_workers
+
+    pipeline = AlignmentPipeline(
+        {"ladder_analysis": {"visualization": ladder_visualization}}
+    )
+
+    assert pipeline.individual_plot_workers == expected_workers
+
+
+@pytest.mark.parametrize("invalid_workers", [True, 0, -1, 1.5, "4"])
+def test_individual_plot_workers_must_be_a_positive_integer(invalid_workers):
+    with pytest.raises(ValueError, match="individual_plot_workers.*positive integer"):
+        AlignmentPipeline(
+            {
+                "ladder_analysis": {
+                    "visualization": {
+                        "individual_plot_workers": invalid_workers,
+                    }
+                }
+            }
+        )
+
+
+def test_parallel_sensor_plots_match_sequential_pngs(tmp_path: Path):
+    x = np.linspace(-2.0, 2.0, 8)
+    y = np.linspace(-1.0, 1.0, 6)
+    xy = np.asarray([(x_value, y_value) for x_value in x for y_value in y])
+
+    def sensor_result(name: str, y_offset: float) -> SensorPlaneResult:
+        residuals = np.linspace(-0.02, 0.02, len(xy))
+        points = np.column_stack(
+            [xy[:, 0], xy[:, 1] + y_offset, residuals]
+        )
+        plane = PlaneFitResult(
+            normal=np.asarray([0.0, 0.0, 1.0]),
+            d=0.0,
+            centroid=np.mean(points, axis=0),
+            inlier_mask=np.ones(len(points), dtype=bool),
+            rms_mm=float(np.sqrt(np.mean(residuals**2))),
+            params=np.zeros(3),
+            covariance_params=np.eye(3),
+            rotation_to_xy=np.eye(3),
+        )
+        return SensorPlaneResult(name=name, points=points, plane=plane)
+
+    results = [sensor_result("S0", 0.0), sensor_result("S1", 3.0)]
+    sequential_dir = tmp_path / "sequential"
+    parallel_dir = tmp_path / "parallel"
+
+    sequential_visualizer = LadderVisualizer(
+        dpi=72,
+        sample_size=20,
+        random_seed=23,
+    )
+    sequential_paths = sequential_visualizer.plot_individual_residuals(
+        results,
+        sequential_dir,
+        filename_prefix="L0_",
+    )
+
+    parallel_visualizer = LadderVisualizer(
+        dpi=72,
+        sample_size=20,
+        random_seed=23,
+    )
+    prepared = parallel_visualizer.prepare_individual_residuals(
+        results,
+        parallel_dir,
+        filename_prefix="L0_",
+    )
+    pipeline = AlignmentPipeline(
+        {
+            "ladder_analysis": {
+                "visualization": {"individual_plot_workers": 2}
+            }
+        }
+    )
+    pipeline.ladder_visualizer = parallel_visualizer
+    parallel_paths = pipeline._render_prepared_individual_plots(
+        prepared,
+        point_size=2.0,
+    )
+
+    assert [path.name for path in sequential_paths] == [
+        path.name for path in parallel_paths
+    ]
+    sequential_hashes = [
+        hashlib.sha256(path.read_bytes()).hexdigest() for path in sequential_paths
+    ]
+    parallel_hashes = [
+        hashlib.sha256(path.read_bytes()).hexdigest() for path in parallel_paths
+    ]
+    assert sequential_hashes == parallel_hashes
 
 
 @pytest.mark.parametrize(
@@ -297,7 +453,11 @@ def test_pipeline_processes_named_ladders_with_mixed_segmentation_modes(
                 {"name": "L1T0", "file": "data/L1T0.xyz"},
             ],
         },
-        "visualization": {"dpi": 72, "sample_size": 1000},
+        "visualization": {
+            "dpi": 72,
+            "sample_size": 1000,
+            "individual_plot_workers": 2,
+        },
         "write_individual_plots": True,
     }
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
@@ -486,7 +646,11 @@ def test_pipeline_can_disable_each_visualization_stage(
             "segmentation": {"mode": "segmented_files"},
             "sensors": [{"name": "S0", "file": "data/S0.xyz"}],
         },
-        "visualization": {"dpi": 72, "sample_size": 1000},
+        "visualization": {
+            "dpi": 72,
+            "sample_size": 1000,
+            "individual_plot_workers": 1,
+        },
     }
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import islice
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +20,9 @@ class AsciiPointCloudLoader:
         self.delimiter = delimiter
 
     def _is_comment(self, stripped: str) -> bool:
-        return not stripped or any(stripped.startswith(p) for p in self.comment_prefixes)
+        return not stripped or any(
+            stripped.startswith(p) for p in self.comment_prefixes
+        )
 
     def _split(self, s: str) -> list[str]:
         if self.delimiter in (None, "whitespace"):
@@ -64,7 +67,9 @@ class AsciiPointCloudLoader:
             raise ValueError(f"Non-finite numeric values found in {path}")
         points = arr[:, :3]
         covs = self._build_covariances(arr, uncertainty, path)
-        return PointCloudData(points=points, covariances=covs, header_lines=header, source=path)
+        return PointCloudData(
+            points=points, covariances=covs, header_lines=header, source=path
+        )
 
     @staticmethod
     def _validate_columns(arr: np.ndarray, cols, needed: int, label: str) -> np.ndarray:
@@ -85,7 +90,9 @@ class AsciiPointCloudLoader:
             raise ValueError(f"{label} contains negative covariance diagonal entries.")
         return C
 
-    def _build_covariances(self, arr: np.ndarray, uncertainty: dict | None, point_path: Path):
+    def _build_covariances(
+        self, arr: np.ndarray, uncertainty: dict | None, point_path: Path
+    ):
         if not uncertainty or uncertainty.get("mode", "none") == "none":
             return None
         mode = uncertainty["mode"]
@@ -95,12 +102,16 @@ class AsciiPointCloudLoader:
         if mode == "constant":
             sig = np.asarray(uncertainty["sigma_xyz_mm"], float)
             if sig.shape != (3,) or not np.all(np.isfinite(sig)) or np.any(sig < 0.0):
-                raise ValueError("sigma_xyz_mm must be three finite non-negative values.")
+                raise ValueError(
+                    "sigma_xyz_mm must be three finite non-negative values."
+                )
             C[:] = np.diag(sig**2)
             return C
 
         if mode == "columns_sigma":
-            cols = self._validate_columns(arr, uncertainty.get("columns", [3, 4, 5]), 3, mode)
+            cols = self._validate_columns(
+                arr, uncertainty.get("columns", [3, 4, 5]), 3, mode
+            )
             sig = arr[:, cols]
             if np.any(sig < 0.0):
                 raise ValueError("Sigma columns must be non-negative.")
@@ -110,7 +121,9 @@ class AsciiPointCloudLoader:
             return C
 
         if mode == "columns_covariance":
-            cols = self._validate_columns(arr, uncertainty.get("columns", [3, 4, 5, 6, 7, 8]), 6, mode)
+            cols = self._validate_columns(
+                arr, uncertainty.get("columns", [3, 4, 5, 6, 7, 8]), 6, mode
+            )
             v = arr[:, cols]
             C[:, 0, 0], C[:, 1, 1], C[:, 2, 2] = v[:, 0], v[:, 1], v[:, 2]
             C[:, 0, 1] = C[:, 1, 0] = v[:, 3]
@@ -137,10 +150,14 @@ class AsciiPointCloudLoader:
                     f"got {u.shape}."
                 )
             if not np.all(np.isfinite(u)):
-                raise ValueError(f"Uncertainty file {upath} contains non-finite values.")
+                raise ValueError(
+                    f"Uncertainty file {upath} contains non-finite values."
+                )
             if mode == "file_sigma":
                 if np.any(u < 0.0):
-                    raise ValueError(f"Uncertainty file {upath} contains negative sigma values.")
+                    raise ValueError(
+                        f"Uncertainty file {upath} contains negative sigma values."
+                    )
                 C[:, 0, 0] = u[:, 0] ** 2
                 C[:, 1, 1] = u[:, 1] ** 2
                 C[:, 2, 2] = u[:, 2] ** 2
@@ -169,25 +186,49 @@ class AsciiPointCloudLoader:
             raise ValueError("R and t must have shapes (3, 3) and (3,).")
         dst.parent.mkdir(parents=True, exist_ok=True)
         fmt = f"{{:.{int(precision)}f}}"
-        with src.open("r", encoding="utf-8", errors="replace") as fi, dst.open("w", encoding="utf-8") as fo:
-            for line in fi:
-                s = line.strip()
-                if self._is_comment(s):
-                    if preserve_header:
-                        fo.write(line if line.endswith("\n") else line + "\n")
-                    continue
-                parts = self._split(s)
-                if len(parts) < 3:
-                    if preserve_header:
-                        fo.write(line if line.endswith("\n") else line + "\n")
-                    continue
-                try:
-                    xyz = np.array([float(parts[0]), float(parts[1]), float(parts[2])])
-                except ValueError:
-                    if preserve_header:
-                        fo.write(line if line.endswith("\n") else line + "\n")
-                    continue
-                out = R @ xyz + t
-                parts[:3] = [fmt.format(v) for v in out]
-                sep = " " if self.delimiter in (None, "whitespace", "auto") else self.delimiter
-                fo.write(sep.join(parts) + "\n")
+        sep = " " if self.delimiter in (None, "whitespace", "auto") else self.delimiter
+        batch_size = 8192
+        with (
+            src.open("r", encoding="utf-8", errors="replace") as fi,
+            dst.open("w", encoding="utf-8") as fo,
+        ):
+            while lines := list(islice(fi, batch_size)):
+                output_lines: list[str | None] = [None] * len(lines)
+                xyz_rows: list[list[float]] = []
+                numeric_rows: list[tuple[int, list[str]]] = []
+
+                for index, line in enumerate(lines):
+                    stripped = line.strip()
+                    if self._is_comment(stripped):
+                        if preserve_header:
+                            output_lines[index] = (
+                                line if line.endswith("\n") else line + "\n"
+                            )
+                        continue
+
+                    parts = self._split(stripped)
+                    if len(parts) < 3:
+                        if preserve_header:
+                            output_lines[index] = (
+                                line if line.endswith("\n") else line + "\n"
+                            )
+                        continue
+                    try:
+                        xyz_rows.append(
+                            [float(parts[0]), float(parts[1]), float(parts[2])]
+                        )
+                    except ValueError:
+                        if preserve_header:
+                            output_lines[index] = (
+                                line if line.endswith("\n") else line + "\n"
+                            )
+                        continue
+                    numeric_rows.append((index, parts))
+
+                if xyz_rows:
+                    transformed = np.asarray(xyz_rows) @ R.T + t
+                    for (index, parts), xyz in zip(numeric_rows, transformed):
+                        parts[:3] = [fmt.format(value) for value in xyz]
+                        output_lines[index] = sep.join(parts) + "\n"
+
+                fo.writelines(line for line in output_lines if line is not None)

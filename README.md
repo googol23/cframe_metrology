@@ -928,6 +928,7 @@ ladder_analysis:
     use_inliers_for_scale: true
     show_outliers: false
     point_size: 2.0
+    individual_plot_workers: 4
 ```
 
 The drawing switches control these outputs:
@@ -940,6 +941,8 @@ The drawing switches control these outputs:
 Disabling drawing never disables loading, segmentation, plane fitting, numerical results, or transformed point-cloud output. If an output directory is reused, the pipeline removes its own stale PNGs for any disabled stage. The legacy `ladder_analysis.write_individual_plots` switch remains supported when `visualization.draw.sensors` is omitted; the new stage switch takes precedence when both are present.
 
 `sample_size` controls visualization sampling only. The numerical plane fit uses the complete loaded sensor cloud. `residual_percentile` can be used to prevent a small number of extreme residuals from making the colour scale uninformative.
+
+`individual_plot_workers` controls process-based generation of the independent per-sensor PNGs. It must be a positive integer and defaults to `4`. The effective worker count is the minimum of the configured value, the available logical CPU count, and the number of pending sensor plots. Use `1` to render sequentially. Each worker uses the non-interactive Agg backend and owns and closes its Matplotlib figure; fitting and numerical results remain in the parent process.
 
 ---
 
@@ -1035,6 +1038,7 @@ ladder_analysis:
     use_inliers_for_scale: true
     show_outliers: false
     point_size: 2.0
+    individual_plot_workers: 4
 ```
 
 The repository also contains:

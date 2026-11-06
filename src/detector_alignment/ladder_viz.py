@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -8,6 +9,69 @@ import numpy as np
 from matplotlib.colors import TwoSlopeNorm
 
 from .ladder import SensorPlaneResult
+
+
+@dataclass(frozen=True)
+class PreparedIndividualResidualPlot:
+    """Fully prepared data for one independent sensor residual PNG."""
+
+    output_path: Path
+    sensor_name: str
+    points_xy: np.ndarray
+    residuals_um: np.ndarray
+    residual_limit_um: float
+    rms_um: float
+
+
+def render_prepared_individual_residual(
+    plot: PreparedIndividualResidualPlot,
+    *,
+    dpi: int,
+    point_size: float,
+) -> Path:
+    """Render one prepared sensor residual plot in the current process."""
+    norm = TwoSlopeNorm(
+        vmin=-plot.residual_limit_um,
+        vcenter=0.0,
+        vmax=plot.residual_limit_um,
+    )
+
+    plot.output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8, 7))
+    try:
+        scatter_artist = ax.scatter(
+            plot.points_xy[:, 0],
+            plot.points_xy[:, 1],
+            c=plot.residuals_um,
+            s=point_size,
+            norm=norm,
+            cmap="coolwarm",
+            linewidths=0,
+            rasterized=True,
+        )
+
+        colorbar = fig.colorbar(scatter_artist, ax=ax)
+        colorbar.set_label("Distance to fitted plane [µm]")
+
+        ax.set_xlabel("X [mm]")
+        ax.set_ylabel("Y [mm]")
+        ax.set_title(
+            f"{plot.sensor_name} plane residuals\n"
+            f"RMS = {plot.rms_um:.2f} µm"
+        )
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, alpha=0.2)
+
+        fig.tight_layout()
+        fig.savefig(
+            plot.output_path,
+            dpi=dpi,
+            bbox_inches="tight",
+        )
+    finally:
+        plt.close(fig)
+
+    return plot.output_path
 
 
 class LadderVisualizer:
@@ -304,6 +368,73 @@ class LadderVisualizer:
 
         return output_path
 
+    def _prepare_individual_residual(
+        self,
+        result: SensorPlaneResult,
+        output_dir: Path,
+        *,
+        filename_prefix: str,
+        residual_percentile: float,
+        show_outliers: bool,
+    ) -> PreparedIndividualResidualPlot:
+        residuals = result.residuals_mm
+        scale_values = residuals[result.plane.inlier_mask]
+
+        if len(scale_values) == 0:
+            scale_values = residuals
+
+        limit_um = float(
+            np.percentile(
+                np.abs(scale_values) * 1000.0,
+                residual_percentile,
+            )
+        )
+        limit_um = max(limit_um, 1e-9)
+
+        idx = self._sample_indices(len(result.points))
+        if not show_outliers:
+            idx = idx[result.plane.inlier_mask[idx]]
+
+        output_path = output_dir / (
+            f"{filename_prefix}sensor_{self._safe_name(result.name)}"
+            "_plane_residuals.png"
+        )
+        return PreparedIndividualResidualPlot(
+            output_path=output_path,
+            sensor_name=result.name,
+            points_xy=result.points[idx, :2],
+            residuals_um=residuals[idx] * 1000.0,
+            residual_limit_um=limit_um,
+            rms_um=result.plane.rms_mm * 1000.0,
+        )
+
+    def prepare_individual_residuals(
+        self,
+        results: Iterable[SensorPlaneResult],
+        output_dir: str | Path,
+        *,
+        filename_prefix: str = "",
+        residual_percentile: float = 99.0,
+        show_outliers: bool = False,
+    ) -> list[PreparedIndividualResidualPlot]:
+        """Prepare deterministic per-sensor arrays before process rendering."""
+        results = list(results)
+        if not results:
+            raise ValueError("No sensor-plane results supplied.")
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return [
+            self._prepare_individual_residual(
+                result,
+                output_dir,
+                filename_prefix=filename_prefix,
+                residual_percentile=residual_percentile,
+                show_outliers=show_outliers,
+            )
+            for result in results
+        ]
+
     def plot_individual_residuals(
         self,
         results: Iterable[SensorPlaneResult],
@@ -314,86 +445,22 @@ class LadderVisualizer:
         show_outliers: bool = False,
         point_size: float = 2.0,
     ) -> list[Path]:
-        """Write one XY residual map per sensor."""
-        results = list(results)
-
-        if not results:
-            raise ValueError("No sensor-plane results supplied.")
-
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        written: list[Path] = []
-
-        for result in results:
-            residuals = result.residuals_mm
-            scale_values = residuals[result.plane.inlier_mask]
-
-            if len(scale_values) == 0:
-                scale_values = residuals
-
-            limit_um = float(
-                np.percentile(
-                    np.abs(scale_values) * 1000.0,
-                    residual_percentile,
-                )
-            )
-            limit_um = max(limit_um, 1e-9)
-
-            norm = TwoSlopeNorm(
-                vmin=-limit_um,
-                vcenter=0.0,
-                vmax=limit_um,
-            )
-
-            idx = self._sample_indices(len(result.points))
-            if not show_outliers:
-                idx = idx[result.plane.inlier_mask[idx]]
-
-            points = result.points[idx]
-            residuals_um = residuals[idx] * 1000.0
-
-            fig, ax = plt.subplots(figsize=(8, 7))
-
-            scatter_artist = ax.scatter(
-                points[:, 0],
-                points[:, 1],
-                c=residuals_um,
-                s=point_size,
-                norm=norm,
-                cmap="coolwarm",
-                linewidths=0,
-                rasterized=True,
-            )
-
-            colorbar = fig.colorbar(scatter_artist, ax=ax)
-            colorbar.set_label("Distance to fitted plane [µm]")
-
-            ax.set_xlabel("X [mm]")
-            ax.set_ylabel("Y [mm]")
-            ax.set_title(
-                f"{result.name} plane residuals\n"
-                f"RMS = {result.plane.rms_mm * 1000.0:.2f} µm"
-            )
-            ax.set_aspect("equal", adjustable="box")
-            ax.grid(True, alpha=0.2)
-
-            fig.tight_layout()
-
-            path = output_dir / (
-                f"{filename_prefix}sensor_{self._safe_name(result.name)}"
-                "_plane_residuals.png"
-            )
-            fig.savefig(
-                path,
+        """Write one XY residual map per sensor in the current process."""
+        prepared = self.prepare_individual_residuals(
+            results,
+            output_dir,
+            filename_prefix=filename_prefix,
+            residual_percentile=residual_percentile,
+            show_outliers=show_outliers,
+        )
+        return [
+            render_prepared_individual_residual(
+                plot,
                 dpi=self.dpi,
-                bbox_inches="tight",
+                point_size=point_size,
             )
-            plt.close(fig)
-
-            written.append(path)
-
-        return written
+            for plot in prepared
+        ]
 
     @staticmethod
     def _safe_name(value: str) -> str:
