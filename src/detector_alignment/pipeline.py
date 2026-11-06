@@ -74,6 +74,7 @@ class AlignmentPipeline:
     _LADDER_GLOBAL_KEYS = frozenset(
         {
             "enabled",
+            "analyze_individual_sensors",
             "sensor_plane_fit",
             "visualization",
             "write_individual_plots",
@@ -160,6 +161,16 @@ class AlignmentPipeline:
             ladder_cfg = {}
         if not isinstance(ladder_cfg, dict):
             raise ValueError("'ladder_analysis' must be a YAML mapping.")
+
+        analyze_individual_sensors = ladder_cfg.get(
+            "analyze_individual_sensors",
+            True,
+        )
+        if not isinstance(analyze_individual_sensors, bool):
+            raise ValueError(
+                "'ladder_analysis.analyze_individual_sensors' must be true or false."
+            )
+        self.analyze_individual_sensors = analyze_individual_sensors
 
         write_individual_plots = ladder_cfg.get("write_individual_plots", True)
         if not isinstance(write_individual_plots, bool):
@@ -285,6 +296,17 @@ class AlignmentPipeline:
         for stem in ("cframe_plane_alignment", "cframe_final_alignment"):
             for suffix in ("", "_top_view", "_residual_histogram"):
                 self._remove_generated_image(images_dir / f"{stem}{suffix}.png")
+
+    def _remove_ladder_analysis_diagnostics(self, images_dir: Path) -> None:
+        for pattern in (
+            "*_ladder_sensor_plane_residuals.png",
+            "*_sensor_*_plane_residuals.png",
+        ):
+            for path in images_dir.glob(pattern):
+                self._remove_generated_image(path)
+        self._remove_generated_image(
+            images_dir / "cframe_all_ladders_sensor_plane_residuals.png"
+        )
 
     def _remove_disabled_ladder_diagnostics(self, images_dir: Path) -> None:
         if not self.visualization_draw["full_ladders"]:
@@ -580,6 +602,8 @@ class AlignmentPipeline:
         if not self.visualization_draw["cframe"]:
             self._remove_cframe_diagnostics(images_dir)
         self._remove_disabled_ladder_diagnostics(images_dir)
+        if not self.analyze_individual_sensors:
+            self._remove_ladder_analysis_diagnostics(images_dir)
         if not self.visualization_draw["all_ladders_and_cframe"]:
             self._remove_generated_image(
                 images_dir / "cframe_all_ladders_sensor_plane_residuals.png"
@@ -885,6 +909,13 @@ class AlignmentPipeline:
                 "analyze_ladders",
                 action="skip",
                 reason="not_configured",
+            )
+            return {}
+        if not self.analyze_individual_sensors:
+            self._log_task(
+                "analyze_ladders",
+                action="skip",
+                reason="individual_sensor_analysis_disabled",
             )
             return {}
 

@@ -55,6 +55,7 @@ visualization:
 # independently selects automatic segmentation or pre-segmented sensor files.
 ladder_analysis:
   enabled: true
+  analyze_individual_sensors: true
   visualization:
     # Effective workers = min(configured value, logical CPUs, pending sensor plots).
     individual_plot_workers: 4

@@ -567,7 +567,7 @@ ladder_analysis:
     file: data/L3DL0.txt
 ```
 
-Every key below `ladder_analysis` other than the shared options (`enabled`, `sensor_plane_fit`, `visualization`, and `write_individual_plots`) is a ladder name. At least one named ladder is required when analysis is enabled. Each ladder has its own segmentation mode and input files, so automatic and pre-segmented inputs can be mixed in one run. The former single-ladder shape, with `segmentation`, `file`, or `sensors` directly below `ladder_analysis`, is rejected.
+Every key below `ladder_analysis` other than the shared options (`enabled`, `analyze_individual_sensors`, `sensor_plane_fit`, `visualization`, and `write_individual_plots`) is a ladder name. At least one named ladder is required when analysis is enabled. Each ladder has its own segmentation mode and input files, so automatic and pre-segmented inputs can be mixed in one run. The former single-ladder shape, with `segmentation`, `file`, or `sensors` directly below `ladder_analysis`, is rejected.
 
 The C-frame alignment is always solved first.
 
@@ -764,7 +764,12 @@ Per-point covariance matrices, when available, are rotated consistently with the
 
 ## 19. Independent plane fitting
 
-Every segmented sensor cloud is fitted independently.
+By default, every segmented sensor cloud is fitted independently. Set
+`ladder_analysis.analyze_individual_sensors: false` to skip sensor loading or
+segmentation, plane fitting, per-sensor numerical results, and ladder residual
+plots. Configured source clouds are still written to the transformed point-cloud
+output. Existing pipeline-owned ladder residual images are removed when this
+option is disabled. The default is `true`, preserving existing behavior.
 
 A separate sensor plane-fit configuration can be supplied:
 
@@ -938,7 +943,7 @@ The drawing switches control these outputs:
 - `full_ladders`: one combined residual image per configured ladder.
 - `all_ladders_and_cframe`: the detector-wide C-frame and all-ladders overview.
 
-Disabling drawing never disables loading, segmentation, plane fitting, numerical results, or transformed point-cloud output. If an output directory is reused, the pipeline removes its own stale PNGs for any disabled stage. The legacy `ladder_analysis.write_individual_plots` switch remains supported when `visualization.draw.sensors` is omitted; the new stage switch takes precedence when both are present.
+Disabling drawing never disables loading, segmentation, plane fitting, numerical results, or transformed point-cloud output. The separate `ladder_analysis.analyze_individual_sensors` flag controls whether sensor loading/segmentation and fitting run at all. If an output directory is reused, the pipeline removes its own stale PNGs for any disabled stage. The legacy `ladder_analysis.write_individual_plots` switch remains supported when `visualization.draw.sensors` is omitted; the new stage switch takes precedence when both are present.
 
 `sample_size` controls visualization sampling only. The numerical plane fit uses the complete loaded sensor cloud. `residual_percentile` can be used to prevent a small number of extreme residuals from making the colour scale uninformative.
 
@@ -1006,6 +1011,7 @@ visualization:
 
 ladder_analysis:
   enabled: true
+  analyze_individual_sensors: true
 
   L3DL0:
     segmentation:

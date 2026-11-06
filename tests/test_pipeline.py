@@ -699,6 +699,75 @@ def test_pipeline_can_disable_each_visualization_stage(
     assert payload["ladders"]["L3DL0"]["sensor_count"] == 1
 
 
+def test_individual_sensor_analysis_can_be_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config_path = _write_synthetic_case(tmp_path)
+    sensor_points = np.array(
+        [
+            [-2.0, -1.0, 3.0],
+            [-2.0, 1.0, 3.0],
+            [2.0, -1.0, 3.0],
+            [2.0, 1.0, 3.0],
+        ]
+    )
+    np.savetxt(tmp_path / "data" / "sensor.xyz", sensor_points)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["ladder_analysis"] = {
+        "enabled": True,
+        "analyze_individual_sensors": False,
+        "L3DL0": {
+            "segmentation": {"mode": "segmented_files"},
+            "sensors": [{"name": "S0", "file": "data/sensor.xyz"}],
+        },
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    images_dir = tmp_path / "output" / "images"
+    images_dir.mkdir(parents=True)
+    stale_images = [
+        "L3DL0_ladder_sensor_plane_residuals.png",
+        "L3DL0_sensor_S0_plane_residuals.png",
+        "cframe_all_ladders_sensor_plane_residuals.png",
+    ]
+    for filename in stale_images:
+        (images_dir / filename).write_text("stale", encoding="utf-8")
+
+    pipeline = AlignmentPipeline.from_yaml(config_path)
+
+    def fail_if_fitted(*args, **kwargs):
+        raise AssertionError("Sensor plane fitting must be skipped.")
+
+    monkeypatch.setattr(pipeline.sensor_plane_fitter, "fit", fail_if_fitted)
+    pipeline.run()
+
+    assert all(not (images_dir / filename).exists() for filename in stale_images)
+    transformed_sensor = (
+        tmp_path / "output" / "point_clouds" / "L3DL0_sensor_transformed.xyz"
+    )
+    assert transformed_sensor.is_file()
+    payload = json.loads(
+        (tmp_path / "output" / "results.json").read_text(encoding="utf-8")
+    )
+    assert payload.get("ladders", {}) == {}
+
+
+def test_individual_sensor_analysis_flag_must_be_boolean():
+    for invalid_value in (None, 0, 1, "false"):
+        with pytest.raises(
+            ValueError,
+            match="analyze_individual_sensors.*true or false",
+        ):
+            AlignmentPipeline(
+                {
+                    "ladder_analysis": {
+                        "analyze_individual_sensors": invalid_value,
+                    }
+                }
+            )
+
+
 def test_legacy_single_ladder_configuration_is_rejected():
     with pytest.raises(ValueError, match="named ladder mappings"):
         AlignmentPipeline(
