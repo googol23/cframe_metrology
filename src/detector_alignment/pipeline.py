@@ -5,8 +5,8 @@ import logging
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial.transform import Rotation
 import yaml
+from scipy.spatial.transform import Rotation
 
 from .fiducials import (
     FiducialMarkerResult,
@@ -28,9 +28,6 @@ from .uncertainty import (
 from .viz import AlignmentVisualizer
 
 
-logger = logging.getLogger(__name__)
-
-
 class AlignmentPipeline:
     """
     End-to-end detector alignment from a C-frame plane and measured centers.
@@ -47,6 +44,7 @@ class AlignmentPipeline:
         output/
         ├── results.json
         ├── images/
+        ├── logs/
         ├── matrices/
         └── point_clouds/
 
@@ -54,6 +52,9 @@ class AlignmentPipeline:
     are kept separate. The machine-readable results.json remains directly in
     the output root.
     """
+
+    _LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
+    _LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
     _LADDER_GLOBAL_KEYS = frozenset(
         {
@@ -77,7 +78,12 @@ class AlignmentPipeline:
             raise TypeError("config must be a mapping.")
 
         self.config = config
-        logger.debug("Initialising AlignmentPipeline.")
+        self._logger = logging.getLogger(
+            f"{__name__}.AlignmentPipeline.{id(self)}"
+        )
+        self._logger.setLevel(logging.DEBUG)
+        self._logger.propagate = False
+        self._log_handlers: list[logging.Handler] = []
 
         io_cfg = config.get("io", {})
         comment_prefixes = io_cfg.get("comment_prefixes", ["#", "//", "$"])
@@ -156,13 +162,57 @@ class AlignmentPipeline:
             ),
         )
 
-        ladder_configs = self._ladder_configs()
-        if ladder_configs:
-            logger.info(
-                "Ladder analysis enabled for %d ladder(s): %s.",
-                len(ladder_configs),
-                ", ".join(name for name, _ in ladder_configs),
-            )
+        self._ladder_configs()
+
+    def _configure_logging(self, outdir: Path) -> Path:
+        """Configure isolated console and file logging for one pipeline run."""
+        self._close_logging()
+
+        logs_dir = outdir / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_path = logs_dir / "pipeline.log"
+        formatter = logging.Formatter(
+            self._LOG_FORMAT,
+            datefmt=self._LOG_DATE_FORMAT,
+        )
+
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+
+        file_handler = logging.FileHandler(
+            log_path,
+            mode="w",
+            encoding="utf-8",
+        )
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+
+        self._log_handlers = [console_handler, file_handler]
+        for handler in self._log_handlers:
+            self._logger.addHandler(handler)
+
+        return log_path
+
+    def _close_logging(self) -> None:
+        """Flush, detach, and close handlers owned by this pipeline instance."""
+        for handler in self._log_handlers:
+            handler.flush()
+            self._logger.removeHandler(handler)
+            handler.close()
+        self._log_handlers.clear()
+
+    @staticmethod
+    def _log_value(value: object) -> str:
+        """Keep user-controlled values on one physical log line."""
+        return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+    def _log_task(self, task: str, **details: object) -> None:
+        context = "".join(
+            f" | {key}={self._log_value(value)}"
+            for key, value in details.items()
+        )
+        self._logger.info("Pipeline | task=%s%s", task, context)
 
     def _ladder_configs(self) -> list[tuple[str, dict]]:
         """Return validated ``(ladder_name, config)`` pairs in YAML order."""
@@ -255,7 +305,6 @@ class AlignmentPipeline:
     @classmethod
     def from_yaml(cls, path: str | Path) -> "AlignmentPipeline":
         path = Path(path)
-        logger.info("Loading configuration from %s", path)
 
         with path.open("r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
@@ -264,6 +313,7 @@ class AlignmentPipeline:
             raise ValueError("Configuration root must be a YAML mapping.")
 
         cfg["_config_dir"] = str(path.parent.resolve())
+        cfg["_config_path"] = str(path.resolve())
         return cls(cfg)
 
     def _resolve(self, value: str | Path) -> Path:
@@ -409,18 +459,32 @@ class AlignmentPipeline:
             )
 
     def run(self) -> AlignmentResult:
-        logger.info("Starting detector-alignment pipeline.")
+        outdir = self._resolve(self.config.get("output_dir", "output"))
+        log_path = self._configure_logging(outdir)
+        config_source = self.config.get("_config_path", "<in-memory>")
+        self._logger.info(
+            "Pipeline | status=started | config=%s | output_dir=%s | log_file=%s",
+            self._log_value(config_source),
+            self._log_value(outdir),
+            self._log_value(log_path),
+        )
+        try:
+            return self._run(outdir)
+        finally:
+            self._close_logging()
 
+    def _run(self, outdir: Path) -> AlignmentResult:
         # ------------------------------------------------------------------
         # Output structure
         #
         # output/
         # ├── results.json
         # ├── images/
+        # ├── logs/
         # ├── matrices/
         # └── point_clouds/
         # ------------------------------------------------------------------
-        outdir = self._resolve(self.config.get("output_dir", "output"))
+        self._log_task("prepare_outputs", output_dir=outdir)
         outdir.mkdir(parents=True, exist_ok=True)
 
         images_dir = outdir / "images"
@@ -431,10 +495,10 @@ class AlignmentPipeline:
         matrices_dir.mkdir(parents=True, exist_ok=True)
         point_clouds_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.debug("Output root: %s", outdir)
-        logger.debug("Image output: %s", images_dir)
-        logger.debug("Matrix output: %s", matrices_dir)
-        logger.debug("Point-cloud output: %s", point_clouds_dir)
+        self._logger.debug("Output root: %s", outdir)
+        self._logger.debug("Image output: %s", images_dir)
+        self._logger.debug("Matrix output: %s", matrices_dir)
+        self._logger.debug("Point-cloud output: %s", point_clouds_dir)
 
         uncertainty_default = self.config.get(
             "uncertainty",
@@ -451,9 +515,9 @@ class AlignmentPipeline:
         if not isinstance(cframe_cfg, dict) or "file" not in cframe_cfg:
             raise ValueError("Configuration requires cframe.file.")
 
-        # 1. C-frame plane
+        # C-frame plane
         cframe_path = self._resolve(cframe_cfg["file"])
-        logger.info("Step 1/5: loading C-frame point cloud: %s", cframe_path)
+        self._log_task("fit_cframe_plane", source=cframe_path)
         cframe = self.loader.load(
             cframe_path,
             cframe_cfg.get("uncertainty", uncertainty_default),
@@ -470,7 +534,11 @@ class AlignmentPipeline:
         fiducial_marker = "x"
         if fiducials_cfg is not None:
             fiducials_path = self._resolve(fiducials_cfg["file"])
-            logger.info("Loading C-frame fiducials: %s", fiducials_path)
+            self._log_task(
+                "process_fiducials",
+                source=fiducials_path,
+                min_distance_mm=fiducials_cfg["fiducial_min_distance"],
+            )
             fiducial_data = self.fiducial_loader.load(
                 fiducials_path,
                 fiducials_cfg.get("uncertainty", uncertainty_default),
@@ -483,12 +551,9 @@ class AlignmentPipeline:
             if fiducials_cfg.get("draw", True):
                 fiducial_points = fiducials.means
 
-        # 2. Measured references
+        # Measured references
         reference_cfg = self._reference_config()
-        logger.info(
-            "Step 2/5: processing %d reference point(s).",
-            len(reference_cfg),
-        )
+        self._log_task("process_references", count=len(reference_cfg))
         references = [
             self._process_reference(
                 cfg,
@@ -504,6 +569,11 @@ class AlignmentPipeline:
         )
 
         cframe_plane_plot = images_dir / "cframe_plane_alignment.png"
+        self._log_task(
+            "write_alignment_diagnostic",
+            stage="plane",
+            destination=cframe_plane_plot,
+        )
         self.visualizer.plot_plane_alignment(
             cframe.points,
             plane.rotation_to_xy,
@@ -514,9 +584,10 @@ class AlignmentPipeline:
             fiducial_marker=fiducial_marker,
         )
 
-        # 3. Final scanner -> detector transformation
-        logger.info(
-            "Step 3/5: calculating final scanner-to-detector transformation."
+        # Final scanner -> detector transformation
+        self._log_task(
+            "compute_detector_transform",
+            references=len(references),
         )
         nominal = np.vstack([ref.nominal_center_xy for ref in references])
         measured = np.vstack([ref.center_xy for ref in references])
@@ -547,6 +618,11 @@ class AlignmentPipeline:
             transformed_fiducials = fiducials.transformed(R, t)
 
         final_plot = images_dir / "cframe_final_alignment.png"
+        self._log_task(
+            "write_alignment_diagnostic",
+            stage="final",
+            destination=final_plot,
+        )
         self.visualizer.plot_plane_alignment(
             cframe.points,
             R,
@@ -559,9 +635,8 @@ class AlignmentPipeline:
             title="C-frame final alignment",
         )
 
-        # 4. Ladder/sensor analysis. The final C-frame result is passed into
+        # Ladder/sensor analysis. The final C-frame result is passed into
         # LadderProcessor; the pipeline does not transform ladder clouds itself.
-        logger.info("Step 4/5: checking ladder-analysis configuration.")
         ladder_results = self._process_ladders(
             alignment=result,
             images_dir=images_dir,
@@ -575,11 +650,12 @@ class AlignmentPipeline:
                 images_dir=images_dir,
             )
 
-        # 5. Outputs
-        logger.info("Step 5/5: writing numerical and transformed outputs.")
-
         # results.json -> output/
         # *.npy        -> output/matrices/
+        self._log_task(
+            "write_numerical_results",
+            destination=outdir / "results.json",
+        )
         self._save_results(
             result,
             outdir,
@@ -590,13 +666,25 @@ class AlignmentPipeline:
         )
 
         # transformed point clouds -> output/point_clouds/
+        self._log_task(
+            "write_transformed_clouds",
+            destination=point_clouds_dir,
+        )
         self._transform_outputs(
             result,
             point_clouds_dir,
             transformed_fiducials=transformed_fiducials,
         )
 
-        logger.info("Detector-alignment pipeline completed successfully.")
+        sensor_count = sum(len(sensors) for sensors in ladder_results.values())
+        self._logger.info(
+            "Pipeline | status=completed | references=%d | ladders=%d | "
+            "sensors=%d | output_dir=%s",
+            len(references),
+            len(ladder_results),
+            sensor_count,
+            self._log_value(outdir),
+        )
         return result
 
     def _process_ladders(
@@ -608,9 +696,14 @@ class AlignmentPipeline:
         """Process every configured ladder independently."""
         ladder_configs = self._ladder_configs()
         if not ladder_configs:
-            logger.info("Ladder analysis disabled or not configured; skipping.")
+            self._log_task(
+                "analyze_ladders",
+                action="skip",
+                reason="not_configured",
+            )
             return {}
 
+        self._log_task("analyze_ladders", count=len(ladder_configs))
         cfg = self.config["ladder_analysis"]
         viz_cfg = cfg.get("visualization", {})
         residual_percentile = float(
@@ -629,10 +722,10 @@ class AlignmentPipeline:
 
         for ladder_name, ladder_cfg in ladder_configs:
             mode = ladder_cfg["segmentation"]["mode"]
-            logger.info(
-                "Starting analysis for ladder %s using segmentation mode '%s'.",
-                ladder_name,
-                mode,
+            self._log_task(
+                "analyze_ladder",
+                ladder=ladder_name,
+                mode=mode,
             )
 
             processor = LadderProcessor(
@@ -650,14 +743,14 @@ class AlignmentPipeline:
                 ladder_cfg,
                 default_uncertainty=uncertainty_default,
             )
-            logger.info(
+            self._logger.debug(
                 "Ladder %s segmentation/loading complete: %d sensor cloud(s).",
                 ladder_name,
                 len(sensors),
             )
             for sensor in sensors:
-                logger.info(
-                    "  Sensor %s: %d points%s",
+                self._logger.debug(
+                    "Sensor %s: %d points%s",
                     sensor.name,
                     len(sensor.points),
                     (
@@ -667,7 +760,7 @@ class AlignmentPipeline:
                     ),
                 )
 
-            logger.info(
+            self._logger.debug(
                 "Fitting one plane per sensor for ladder %s in detector coordinates.",
                 ladder_name,
             )
@@ -676,8 +769,8 @@ class AlignmentPipeline:
 
             for sensor_result in results:
                 residuals = sensor_result.residuals_mm
-                logger.info(
-                    "  Sensor %s plane fit: RMS=%.6f mm (%.3f µm), "
+                self._logger.debug(
+                    "Sensor %s plane fit: RMS=%.6f mm (%.3f µm), "
                     "inliers=%d/%d, max|residual|=%.6f mm",
                     sensor_result.name,
                     sensor_result.plane.rms_mm,
@@ -713,7 +806,10 @@ class AlignmentPipeline:
                     point_size=point_size,
                 )
 
-            logger.info("Ladder %s sensor analysis completed.", ladder_name)
+            self._logger.debug(
+                "Ladder %s sensor analysis completed.",
+                ladder_name,
+            )
 
         return ladder_results
 
@@ -733,12 +829,20 @@ class AlignmentPipeline:
         cframe_residuals_mm = (
             cframe_points @ alignment.plane.normal + alignment.plane.d
         )
+        output_path = (
+            images_dir / "cframe_all_ladders_sensor_plane_residuals.png"
+        )
+        self._log_task(
+            "write_ladder_overview",
+            ladders=len(ladder_results),
+            destination=output_path,
+        )
         self.ladder_visualizer.plot_cframe_and_ladder_residuals(
             transformed_cframe,
             cframe_residuals_mm,
             alignment.plane.inlier_mask,
             ladder_results,
-            images_dir / "cframe_all_ladders_sensor_plane_residuals.png",
+            output_path,
             residual_percentile=float(
                 viz_cfg.get("residual_percentile", 99.0)
             ),
@@ -841,7 +945,7 @@ class AlignmentPipeline:
                 transformed_fiducials.means,
                 fmt=f"%.{precision}f",
             )
-            logger.info(
+            self._logger.debug(
                 "Averaged transformed fiducials written to %s",
                 averaged_path,
             )
@@ -1077,4 +1181,4 @@ class AlignmentPipeline:
         with results_path.open("w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
-        logger.info("Numerical results written to %s", results_path)
+        self._logger.debug("Numerical results written to %s", results_path)

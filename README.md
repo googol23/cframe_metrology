@@ -1098,9 +1098,21 @@ For configured fiducials, an additional `<fiducial_stem>_averaged_transformed.*`
 
 ---
 
+## 29. Pipeline logging
+
+Each pipeline run streams concise `INFO` task progress to the console and writes the same progress to:
+
+```text
+output/logs/pipeline.log
+```
+
+The file also includes `DEBUG` diagnostics such as output paths and per-sensor fit summaries. It is replaced at the start of each run for the configured output directory so it describes the artifacts from that run without mixing entries from earlier executions. Logging is isolated to `AlignmentPipeline` and does not modify application-wide or root logger configuration.
+
+---
+
 # `results.json`
 
-## 29. Machine-readable results
+## 30. Machine-readable results
 
 `results.json` contains the numerical alignment result and associated metrology information.
 
