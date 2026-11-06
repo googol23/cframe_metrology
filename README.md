@@ -883,6 +883,14 @@ L3DL0_ladder_sensor_plane_residuals.png
 L3DL1_ladder_sensor_plane_residuals.png
 ```
 
+When ladder analysis is enabled, the pipeline also writes a detector-wide overview:
+
+```text
+cframe_all_ladders_sensor_plane_residuals.png
+```
+
+This plot colours the transformed C-frame facet by its signed distance from the fitted C-frame plane and overlays every named ladder's sensor points, coloured by distance from each sensor's own fitted plane. All points use one shared signed-residual colour scale, and sensor text labels are omitted from this detector-wide view.
+
 Individual sensor plots receive the same prefix:
 
 ```text

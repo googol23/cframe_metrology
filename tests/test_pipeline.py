@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import yaml
+from matplotlib.axes import Axes
 
 from detector_alignment.pipeline import AlignmentPipeline
 
@@ -162,6 +163,7 @@ def test_fiducial_min_distance_is_required():
 
 def test_pipeline_processes_named_ladders_with_mixed_segmentation_modes(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     config_path = _write_synthetic_case(tmp_path)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -217,9 +219,83 @@ def test_pipeline_processes_named_ladders_with_mixed_segmentation_modes(
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
     pipeline = AlignmentPipeline.from_yaml(config_path)
-    pipeline.run()
+    overview_calls = []
+    overview_text_calls = []
+    original_axes_text = Axes.text
+    original_overview_plot = (
+        pipeline.ladder_visualizer.plot_cframe_and_ladder_residuals
+    )
+
+    def record_axes_text(ax, *args, **kwargs):
+        overview_text_calls.append((args, kwargs))
+        return original_axes_text(ax, *args, **kwargs)
+
+    def record_overview_plot(
+        cframe_points,
+        cframe_residuals_mm,
+        cframe_inlier_mask,
+        ladder_results,
+        output_path,
+        **kwargs,
+    ):
+        overview_calls.append(
+            (
+                cframe_points.copy(),
+                cframe_residuals_mm.copy(),
+                cframe_inlier_mask.copy(),
+                ladder_results,
+                output_path,
+            )
+        )
+        with monkeypatch.context() as overview_monkeypatch:
+            overview_monkeypatch.setattr(Axes, "text", record_axes_text)
+            return original_overview_plot(
+                cframe_points,
+                cframe_residuals_mm,
+                cframe_inlier_mask,
+                ladder_results,
+                output_path,
+                **kwargs,
+            )
+
+    monkeypatch.setattr(
+        pipeline.ladder_visualizer,
+        "plot_cframe_and_ladder_residuals",
+        record_overview_plot,
+    )
+    alignment = pipeline.run()
+
+    assert len(overview_calls) == 1
+    assert overview_text_calls == []
+    (
+        plotted_cframe,
+        plotted_cframe_residuals,
+        plotted_cframe_inliers,
+        plotted_ladders,
+        overview_path,
+    ) = overview_calls[0]
+    scanner_cframe = np.loadtxt(data_dir / "cframe.xyz")
+    expected_cframe = scanner_cframe - scanner_offset
+    expected_cframe_residuals = (
+        scanner_cframe @ alignment.plane.normal + alignment.plane.d
+    )
+    np.testing.assert_allclose(plotted_cframe, expected_cframe, atol=1e-8)
+    np.testing.assert_allclose(
+        plotted_cframe_residuals,
+        expected_cframe_residuals,
+        atol=1e-8,
+    )
+    np.testing.assert_array_equal(
+        plotted_cframe_inliers,
+        alignment.plane.inlier_mask,
+    )
+    assert list(plotted_ladders) == ["L3DL0", "L3DL1"]
 
     images_dir = tmp_path / "output" / "images"
+    assert overview_path == (
+        images_dir / "cframe_all_ladders_sensor_plane_residuals.png"
+    )
+    assert overview_path.exists()
     assert (images_dir / "L3DL0_ladder_sensor_plane_residuals.png").exists()
     assert (images_dir / "L3DL0_sensor_S0_plane_residuals.png").exists()
     assert (images_dir / "L3DL0_sensor_S1_plane_residuals.png").exists()

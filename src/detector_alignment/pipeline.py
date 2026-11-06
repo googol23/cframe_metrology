@@ -567,6 +567,13 @@ class AlignmentPipeline:
             images_dir=images_dir,
             uncertainty_default=uncertainty_default,
         )
+        if ladder_results:
+            self._plot_cframe_and_ladder_residuals(
+                cframe.points,
+                alignment=result,
+                ladder_results=ladder_results,
+                images_dir=images_dir,
+            )
 
         # 5. Outputs
         logger.info("Step 5/5: writing numerical and transformed outputs.")
@@ -709,6 +716,38 @@ class AlignmentPipeline:
             logger.info("Ladder %s sensor analysis completed.", ladder_name)
 
         return ladder_results
+
+    def _plot_cframe_and_ladder_residuals(
+        self,
+        cframe_points: np.ndarray,
+        alignment: AlignmentResult,
+        ladder_results: dict[str, list[SensorPlaneResult]],
+        images_dir: Path,
+    ) -> None:
+        """Write a detector-wide residual map with the C-frame as context."""
+        viz_cfg = self.config["ladder_analysis"].get("visualization", {})
+        cframe_points = np.asarray(cframe_points, dtype=float)
+        transformed_cframe = (
+            cframe_points @ alignment.rotation.T + alignment.translation
+        )
+        cframe_residuals_mm = (
+            cframe_points @ alignment.plane.normal + alignment.plane.d
+        )
+        self.ladder_visualizer.plot_cframe_and_ladder_residuals(
+            transformed_cframe,
+            cframe_residuals_mm,
+            alignment.plane.inlier_mask,
+            ladder_results,
+            images_dir / "cframe_all_ladders_sensor_plane_residuals.png",
+            residual_percentile=float(
+                viz_cfg.get("residual_percentile", 99.0)
+            ),
+            use_inliers_for_scale=bool(
+                viz_cfg.get("use_inliers_for_scale", True)
+            ),
+            show_outliers=bool(viz_cfg.get("show_outliers", False)),
+            point_size=float(viz_cfg.get("point_size", 2.0)),
+        )
 
     def _transform_outputs(
         self,

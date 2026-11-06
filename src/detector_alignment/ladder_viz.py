@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -45,8 +45,13 @@ class LadderVisualizer:
         results: list[SensorPlaneResult],
         percentile: float,
         use_inliers: bool,
+        additional_residuals_mm: Iterable[np.ndarray] = (),
     ) -> float:
-        values = []
+        values = [
+            np.abs(np.asarray(residuals, dtype=float)) * 1000.0
+            for residuals in additional_residuals_mm
+            if len(residuals)
+        ]
 
         for result in results:
             residuals = result.residuals_mm
@@ -156,6 +161,136 @@ class LadderVisualizer:
         ax.set_xlabel("X [mm]")
         ax.set_ylabel("Y [mm]")
         ax.set_title("Ladder sensor plane residuals")
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, alpha=0.2)
+
+        fig.tight_layout()
+        fig.savefig(
+            output_path,
+            dpi=self.dpi,
+            bbox_inches="tight",
+        )
+        plt.close(fig)
+
+        return output_path
+
+    def plot_cframe_and_ladder_residuals(
+        self,
+        cframe_points: np.ndarray,
+        cframe_residuals_mm: np.ndarray,
+        cframe_inlier_mask: np.ndarray,
+        ladder_results: Mapping[str, Iterable[SensorPlaneResult]],
+        output_path: str | Path,
+        *,
+        residual_percentile: float = 99.0,
+        use_inliers_for_scale: bool = True,
+        show_outliers: bool = False,
+        point_size: float = 2.0,
+    ) -> Path:
+        """Plot the detector-frame C-frame facet and every ladder sensor residual."""
+        cframe_points = np.asarray(cframe_points, dtype=float)
+        if (
+            cframe_points.ndim != 2
+            or cframe_points.shape[1] != 3
+            or len(cframe_points) == 0
+        ):
+            raise ValueError("cframe_points must have shape (N, 3) with N > 0.")
+        if not np.all(np.isfinite(cframe_points)):
+            raise ValueError("cframe_points contain NaN or infinite values.")
+
+        cframe_residuals_mm = np.asarray(cframe_residuals_mm, dtype=float)
+        cframe_inlier_mask = np.asarray(cframe_inlier_mask, dtype=bool)
+        if cframe_residuals_mm.shape != (len(cframe_points),):
+            raise ValueError(
+                "cframe_residuals_mm must have one value per C-frame point."
+            )
+        if cframe_inlier_mask.shape != (len(cframe_points),):
+            raise ValueError(
+                "cframe_inlier_mask must have one value per C-frame point."
+            )
+        if not np.all(np.isfinite(cframe_residuals_mm)):
+            raise ValueError(
+                "cframe_residuals_mm contain NaN or infinite values."
+            )
+
+        results = [
+            result
+            for ladder_sensor_results in ladder_results.values()
+            for result in ladder_sensor_results
+        ]
+        if not results:
+            raise ValueError("No ladder sensor-plane results supplied.")
+
+        cframe_scale_residuals = cframe_residuals_mm
+        if use_inliers_for_scale:
+            cframe_scale_residuals = cframe_residuals_mm[cframe_inlier_mask]
+
+        limit_um = self._residual_limit_um(
+            results,
+            percentile=residual_percentile,
+            use_inliers=use_inliers_for_scale,
+            additional_residuals_mm=(cframe_scale_residuals,),
+        )
+        norm = TwoSlopeNorm(
+            vmin=-limit_um,
+            vcenter=0.0,
+            vmax=limit_um,
+        )
+
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        fig, ax = plt.subplots(figsize=(11, 11))
+        cframe_idx = self._sample_indices(len(cframe_points))
+        if not show_outliers:
+            cframe_idx = cframe_idx[cframe_inlier_mask[cframe_idx]]
+        sampled_cframe = cframe_points[cframe_idx]
+        ax.scatter(
+            sampled_cframe[:, 0],
+            sampled_cframe[:, 1],
+            c=cframe_residuals_mm[cframe_idx] * 1000.0,
+            s=max(point_size, 1.0),
+            norm=norm,
+            cmap="coolwarm",
+            marker="s",
+            alpha=0.65,
+            linewidths=0,
+            rasterized=True,
+            zorder=1,
+        )
+
+        scatter_artist = None
+        for result in results:
+            idx = self._sample_indices(len(result.points))
+            if not show_outliers:
+                idx = idx[result.plane.inlier_mask[idx]]
+            if len(idx) == 0:
+                continue
+
+            points = result.points[idx]
+            residuals_um = result.residuals_mm[idx] * 1000.0
+            scatter_artist = ax.scatter(
+                points[:, 0],
+                points[:, 1],
+                c=residuals_um,
+                s=point_size,
+                norm=norm,
+                cmap="coolwarm",
+                linewidths=0,
+                rasterized=True,
+                zorder=2,
+            )
+
+        if scatter_artist is None:
+            plt.close(fig)
+            raise RuntimeError("No ladder sensor points remained for plotting.")
+
+        colorbar = fig.colorbar(scatter_artist, ax=ax)
+        colorbar.set_label("Distance to fitted plane [µm]")
+
+        ax.set_xlabel("X [mm]")
+        ax.set_ylabel("Y [mm]")
+        ax.set_title("C-frame facet and all ladder sensor plane residuals")
         ax.set_aspect("equal", adjustable="box")
         ax.grid(True, alpha=0.2)
 
