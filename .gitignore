@@ -227,6 +227,8 @@ CloudCompare/.*
 examples/data
 examples/output
 
+*.gif
+
 input
 
 token
