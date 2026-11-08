@@ -6,6 +6,7 @@ from scipy.optimize import least_squares
 from .math3d import (
     angles_from_normal,
     normal_from_angles,
+    normal_direction_sign,
     rotation_align_normal_to_z,
 )
 from .models import PlaneFitResult
@@ -35,6 +36,10 @@ class RobustPlaneFitter:
 
     random_seed
         Seed used for reproducible random sampling.
+
+    normal_direction
+        Target for rotation_to_xy: "+z" (default) or "-z". The fitted
+        scanner-frame normal/plane parameter convention is unchanged.
     """
 
     # ------------------------------------------------------------------
@@ -81,10 +86,13 @@ class RobustPlaneFitter:
         ransac_iterations=600,
         ransac_threshold_mm=0.05,
         random_seed=42,
+        normal_direction: str = "+z",
     ):
         self.ransac_iterations = int(ransac_iterations)
         self.ransac_threshold_mm = float(ransac_threshold_mm)
         self.rng = np.random.default_rng(random_seed)
+        normal_direction_sign(normal_direction)
+        self.normal_direction = normal_direction
 
         if self.ransac_iterations <= 0:
             raise ValueError("ransac_iterations must be greater than zero.")
@@ -719,9 +727,9 @@ class RobustPlaneFitter:
 
         # ==============================================================
         # STEP 9
-        # Rotation aligning plane normal with +Z
+        # Rotation aligning the fitted normal with the selected Z direction
         # ==============================================================
-        R = rotation_align_normal_to_z(normal)
+        R = rotation_align_normal_to_z(normal, self.normal_direction)
 
         # ==============================================================
         # Return EXACTLY the same result structure as before

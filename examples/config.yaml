@@ -13,6 +13,8 @@ uncertainty:
 
 cframe:
   file: data/c_frame_facet.txt
+  normal: "+z" # Aligned facet normal: "+z" (default) or "-z".
+  facet_offset: 0.75 # Target facet Z in mm; half the C-frame thickness (default: 0.0).
 
 # Optional measured C-frame fiducials. Rows may be comma-, space-, or
 # tab-separated. Repeated measurements closer than the configured minimum
@@ -56,6 +58,19 @@ visualization:
 ladder_analysis:
   enabled: true
   analyze_individual_sensors: true
+  # Optional shared nominal-registration settings. Uncomment together with each
+  # ladder's geometry_file block below. Paths are relative to this YAML file.
+  # measurement_frame must equal the export's exact reference_node (or 'global')
+  # AND physically coincide with the pipeline's detector/C-frame coordinates.
+  # registration:
+  #   enabled: true
+  #   measurement_frame: global
+  #   uncertainty_sigma: 3.0
+  #   containment_tolerance_mm: 1.0e-6
+  #   max_translation_mm: 5.0
+  #   max_rotation_deg: 5.0
+  #   max_iterations: 300
+  #   draw: true
   visualization:
     # Effective workers = min(configured value, logical CPUs, pending sensor plots).
     individual_plot_workers: 4
@@ -68,6 +83,12 @@ ladder_analysis:
         # y_center_mm: 0.0
         min_points_per_sensor: 50
     file: data/L3DL0.txt
+    # Per-ladder fields override shared settings one field at a time.
+    # geometry_file is a geo-inspector ladder JSON export (cm converted to mm).
+    # No ladder-name -> ROOT-node mapping or frame conversion is guessed.
+    # registration:
+    #   geometry_file: data/L3DL0_geometry.json
+    #   max_translation_mm: 2.0 # Other shared fields remain inherited.
 
   # L3DL1:
   #   segmentation:

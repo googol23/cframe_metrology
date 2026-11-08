@@ -23,10 +23,11 @@ from .ladder_viz import (
     PreparedIndividualResidualPlot,
     render_prepared_individual_residual,
 )
-from .math3d import homogeneous
+from .math3d import homogeneous, validate_facet_offset
 from .models import AlignmentResult
 from .plane import RobustPlaneFitter
 from .reference import MeasuredReferenceProcessor, MeasuredReferenceResult
+from .registration_stage import LadderRegistrationStage
 from .segmentation import segment_ladder
 from .uncertainty import (
     build_joint_covariance,
@@ -78,6 +79,7 @@ class AlignmentPipeline:
             "sensor_plane_fit",
             "visualization",
             "write_individual_plots",
+            "registration",
         }
     )
     _LEGACY_SINGLE_LADDER_KEYS = frozenset(
@@ -94,6 +96,15 @@ class AlignmentPipeline:
             raise TypeError("config must be a mapping.")
 
         self.config = config
+        cframe_cfg = config.get("cframe", {})
+        if not isinstance(cframe_cfg, dict):
+            raise ValueError("'cframe' must be a YAML mapping.")
+        self.cframe_normal = cframe_cfg.get("normal", "+z")
+        if not isinstance(self.cframe_normal, str) or self.cframe_normal not in ("+z", "-z"):
+            raise ValueError("'cframe.normal' must be '+z' or '-z'.")
+        self.cframe_facet_offset = validate_facet_offset(
+            cframe_cfg.get("facet_offset", 0.0),
+        )
         self._logger = logging.getLogger(
             f"{__name__}.AlignmentPipeline.{id(self)}"
         )
@@ -118,11 +129,13 @@ class AlignmentPipeline:
             ransac_iterations=p_cfg.get("ransac_iterations", 600),
             ransac_threshold_mm=p_cfg.get("ransac_threshold_mm", 0.05),
             random_seed=p_cfg.get("random_seed", 42),
+            normal_direction=self.cframe_normal,
         )
 
         r_cfg = config.get("reference_points", {})
         self.reference_processor = MeasuredReferenceProcessor(
             derivative_step_rad=r_cfg.get("derivative_step_rad", 1.0e-7),
+            normal_direction=self.cframe_normal,
         )
 
         v_cfg = config.get("visualization", {})
@@ -236,6 +249,16 @@ class AlignmentPipeline:
         )
 
         self._ladder_configs()
+        self.registration_stage = LadderRegistrationStage(
+            self.loader,
+            self._resolve,
+            self._logger,
+            dpi=ladder_viz_cfg.get("dpi", v_cfg.get("dpi", 600)),
+            sample_size=ladder_viz_cfg.get(
+                "sample_size", v_cfg.get("sample_size", 50_000)
+            ),
+            random_seed=ladder_viz_cfg.get("random_seed", v_cfg.get("random_seed", 42)),
+        )
 
     def _configure_logging(self, outdir: Path) -> Path:
         """Configure isolated console and file logging for one pipeline run."""
@@ -388,6 +411,11 @@ class AlignmentPipeline:
                         "a mapping."
                     )
 
+            registration = LadderRegistrationStage.resolve_config(
+                cfg.get("registration"), ladder_cfg.get("registration"),
+            )
+            if registration is not None:
+                ladder_cfg = {**ladder_cfg, "registration": registration}
             safe_prefix = LadderVisualizer._safe_name(raw_name)
             collision_key = safe_prefix.casefold()
             previous_name = output_prefixes.get(collision_key)
@@ -631,7 +659,10 @@ class AlignmentPipeline:
 
         # C-frame plane
         cframe_path = self._resolve(cframe_cfg["file"])
-        self._log_task("fit_cframe_plane", source=cframe_path)
+        self._log_task(
+            "fit_cframe_plane", source=cframe_path, normal=self.cframe_normal,
+            facet_offset_mm=self.cframe_facet_offset,
+        )
         cframe = self.loader.load(
             cframe_path,
             cframe_cfg.get("uncertainty", uncertainty_default),
@@ -720,6 +751,8 @@ class AlignmentPipeline:
             q0,
             Cq,
             nominal,
+            normal_direction=self.cframe_normal,
+            facet_offset=self.cframe_facet_offset,
         )
 
         result = AlignmentResult(
@@ -779,6 +812,15 @@ class AlignmentPipeline:
                 "All-ladders and C-frame diagnostic disabled; skipping."
             )
 
+        # Registration uses every source point, independently of segmentation
+        # and the optional individual sensor-plane analysis.
+        ladder_registrations = self.registration_stage.run(
+            self._ladder_configs(),
+            result,
+            outdir,
+            uncertainty_default,
+        )
+
         # results.json -> output/
         # *.npy        -> output/matrices/
         self._log_task(
@@ -790,6 +832,7 @@ class AlignmentPipeline:
             outdir,
             matrices_dir,
             ladder_results=ladder_results,
+            ladder_registrations=ladder_registrations,
             fiducials=fiducials,
             transformed_fiducials=transformed_fiducials,
         )
@@ -1280,6 +1323,7 @@ class AlignmentPipeline:
         ladder_results: dict[str, list[SensorPlaneResult]] | None = None,
         fiducials: FiducialMeasurementResult | None = None,
         transformed_fiducials: FiducialMeasurementResult | None = None,
+        ladder_registrations: dict | None = None,
     ) -> None:
         """
         Save numerical alignment products.
@@ -1383,6 +1427,9 @@ class AlignmentPipeline:
             ),
             "plane": {
                 "normal": result.plane.normal.tolist(),
+                "normal_direction": self.cframe_normal,
+                "facet_offset_mm": self.cframe_facet_offset,
+                "normal_detector": (result.rotation @ result.plane.normal).tolist(),
                 "d_mm": float(result.plane.d),
                 "params_theta_phi_d": result.plane.params.tolist(),
                 "rms_mm": float(result.plane.rms_mm),
@@ -1421,6 +1468,9 @@ class AlignmentPipeline:
                 }
                 for ladder_name, sensor_results in ladder_results.items()
             }
+
+        if ladder_registrations:
+            payload["ladder_registrations"] = ladder_registrations
 
         # results.json intentionally remains directly in the output root.
         results_path = outdir / "results.json"

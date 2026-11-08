@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .math3d import normal_from_angles, rotation_align_normal_to_z
+from .math3d import normal_from_angles, normal_direction_sign, rotation_align_normal_to_z
 
 
 @dataclass
@@ -24,24 +24,26 @@ class MeasuredReferenceResult:
 class MeasuredReferenceProcessor:
     """Propagate a directly measured 3D point into the leveled reference state."""
 
-    def __init__(self, derivative_step_rad: float = 1.0e-7):
+    def __init__(self, derivative_step_rad: float = 1.0e-7, *, normal_direction: str = "+z"):
+        normal_direction_sign(normal_direction)
+        self.normal_direction = normal_direction
         self.derivative_step_rad = float(derivative_step_rad)
         if self.derivative_step_rad <= 0.0:
             raise ValueError("derivative_step_rad must be positive.")
 
     @staticmethod
-    def _rotation_from_plane_params(plane_params: np.ndarray) -> np.ndarray:
+    def _rotation_from_plane_params(plane_params: np.ndarray, normal_direction: str = "+z") -> np.ndarray:
         plane_params = np.asarray(plane_params, dtype=float)
         if plane_params.shape != (3,):
             raise ValueError("plane_params must have shape (3,).")
         if not np.all(np.isfinite(plane_params)):
             raise ValueError("plane_params must be finite.")
         normal = normal_from_angles(float(plane_params[0]), float(plane_params[1]))
-        return rotation_align_normal_to_z(normal)
+        return rotation_align_normal_to_z(normal, normal_direction)
 
     @classmethod
-    def _center_xy(cls, point_xyz: np.ndarray, plane_params: np.ndarray) -> np.ndarray:
-        return (cls._rotation_from_plane_params(plane_params) @ point_xyz)[:2]
+    def _center_xy(cls, point_xyz: np.ndarray, plane_params: np.ndarray, normal_direction: str = "+z") -> np.ndarray:
+        return (cls._rotation_from_plane_params(plane_params, normal_direction) @ point_xyz)[:2]
 
     def process(
         self,
@@ -70,7 +72,7 @@ class MeasuredReferenceProcessor:
             raise ValueError("point_covariance_xyz must be finite with shape (3, 3).")
         point_covariance_xyz = 0.5 * (point_covariance_xyz + point_covariance_xyz.T)
 
-        R = self._rotation_from_plane_params(plane_params)
+        R = self._rotation_from_plane_params(plane_params, self.normal_direction)
         center_xy = (R @ point_xyz)[:2]
         A = R[:2, :]
         covariance_center_conditional = A @ point_covariance_xyz @ A.T
@@ -86,7 +88,8 @@ class MeasuredReferenceProcessor:
             p_plus[parameter_index] += h
             p_minus[parameter_index] -= h
             J[:, parameter_index] = (
-                self._center_xy(point_xyz, p_plus) - self._center_xy(point_xyz, p_minus)
+                self._center_xy(point_xyz, p_plus, self.normal_direction)
+                - self._center_xy(point_xyz, p_minus, self.normal_direction)
             ) / (2.0 * h)
 
         return MeasuredReferenceResult(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from numbers import Real
+
 import numpy as np
 from scipy.spatial.transform import Rotation
 
@@ -26,8 +28,31 @@ def angles_from_normal(n: np.ndarray) -> tuple[float, float]:
     return theta, phi
 
 
-def rotation_align_normal_to_z(n: np.ndarray) -> np.ndarray:
-    """Return the minimal rotation mapping unit normal *n* onto +Z."""
+def validate_facet_offset(facet_offset: float) -> float:
+    """Validate the fixed detector-frame Z coordinate of the fitted facet, in mm."""
+    if (isinstance(facet_offset, bool) or not isinstance(facet_offset, Real)
+            or not np.isfinite(facet_offset)):
+        raise ValueError("'cframe.facet_offset' must be a finite number in millimetres.")
+    return float(facet_offset)
+
+
+def normal_direction_sign(normal_direction: str) -> float:
+    if not isinstance(normal_direction, str) or normal_direction not in ("+z", "-z"):
+        raise ValueError("normal_direction must be '+z' or '-z'.")
+    return 1.0 if normal_direction == "+z" else -1.0
+
+
+def rotation_align_normal_to_z(
+    n: np.ndarray, normal_direction: str = "+z",
+) -> np.ndarray:
+    """Level a normal onto the selected Z direction with a proper rotation.
+
+    The -Z convention adds a fixed half-turn about leveled X to the usual
+    minimal +Z rotation. This avoids an unstable antipodal-axis choice when
+    the fitted normal is close to scanner +Z.
+    """
+    if normal_direction_sign(normal_direction) < 0:
+        return np.diag([1.0, -1.0, -1.0]) @ rotation_align_normal_to_z(n)
     n = np.asarray(n, float)
     norm = np.linalg.norm(n)
     if not np.isfinite(norm) or norm <= 0.0:

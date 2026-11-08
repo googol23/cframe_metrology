@@ -4,9 +4,11 @@ import numpy as np
 
 from .math3d import (
     normal_from_angles,
+    normal_direction_sign,
     rigid_2d_registration,
     rotation_align_normal_to_z,
     transform_params,
+    validate_facet_offset,
 )
 
 # ======================================================================
@@ -258,6 +260,7 @@ def build_joint_covariance(
 def final_transform_from_q(
     q: np.ndarray,
     nominal_xy: np.ndarray,
+    *, normal_direction: str = "+z", facet_offset: float = 0.0,
 ):
     """
     Compute the final rigid transformation from the state vector.
@@ -283,7 +286,7 @@ def final_transform_from_q(
     ------------------
     theta, phi
         Determine the rotation Rp that aligns the fitted plane normal
-        with +Z.
+        with the selected +Z or -Z direction (sign s).
 
     d
         Determines the Z translation.
@@ -294,13 +297,15 @@ def final_transform_from_q(
 
         and after applying Rp:
 
-            z = -d
+            z = -s*d
 
         Therefore:
 
-            tz = d
+            tz = s*d + facet_offset
 
-        maps the fitted plane onto z = 0.
+        maps the fitted plane onto z = facet_offset (mm, default zero).
+        The offset is a fixed signed detector-Z coordinate, independent of s;
+        it does not add a random variable to the propagated covariance state.
 
     Reference contribution
     ----------------------
@@ -311,6 +316,7 @@ def final_transform_from_q(
         - Y translation
     """
 
+    facet_offset = validate_facet_offset(facet_offset)
     q = np.asarray(
         q,
         dtype=float,
@@ -374,7 +380,7 @@ def final_transform_from_q(
         phi,
     )
 
-    Rp = rotation_align_normal_to_z(n)
+    Rp = rotation_align_normal_to_z(n, normal_direction)
 
     # ------------------------------------------------------------------
     # Remaining 2D rigid registration
@@ -440,11 +446,11 @@ def final_transform_from_q(
     #
     # After Rp:
     #
-    #     z_plane = -d
+    #     z_plane = -s*d, where s selects +Z or -Z
     #
     # therefore:
     #
-    #     tz = d
+    #     tz = s*d + facet_offset
     #
     # Rz does not modify Z.
     # ------------------------------------------------------------------
@@ -453,7 +459,7 @@ def final_transform_from_q(
         [
             t2[0],
             t2[1],
-            d,
+            normal_direction_sign(normal_direction) * d + facet_offset,
         ],
         dtype=float,
     )
@@ -474,6 +480,7 @@ def propagate_final_transform_covariance(
     q0: np.ndarray,
     Cq: np.ndarray,
     nominal_xy: np.ndarray,
+    *, normal_direction: str = "+z", facet_offset: float = 0.0,
 ):
     """
     Propagate the complete state covariance into the final rigid
@@ -544,6 +551,8 @@ def propagate_final_transform_covariance(
     R0, t0, yaw = final_transform_from_q(
         q0,
         nominal_xy,
+        normal_direction=normal_direction,
+        facet_offset=facet_offset,
     )
 
     # The nominal transform parameter vector is evaluated mainly to
@@ -626,6 +635,8 @@ def propagate_final_transform_covariance(
         Rp, tp, _ = final_transform_from_q(
             qp,
             nominal_xy,
+            normal_direction=normal_direction,
+            facet_offset=facet_offset,
         )
 
         yp = np.asarray(
@@ -643,6 +654,8 @@ def propagate_final_transform_covariance(
         Rm, tm, _ = final_transform_from_q(
             qm,
             nominal_xy,
+            normal_direction=normal_direction,
+            facet_offset=facet_offset,
         )
 
         ym = np.asarray(
@@ -653,12 +666,23 @@ def propagate_final_transform_covariance(
             dtype=float,
         )
 
+        # A -Z orientation can lie on the rotation-vector cut at pi. Keep
+        # perturbations on the nominal local branch instead of differentiating
+        # a spurious 2*pi jump between equivalent rotation representations.
+        for parameters in (yp, ym):
+            angle = np.linalg.norm(parameters[:3])
+            if angle > 1e-12:
+                axis = parameters[:3] / angle
+                candidates = parameters[:3] + np.array([-2*np.pi, 0.0, 2*np.pi])[:, None] * axis
+                nearest = np.argmin(np.linalg.norm(candidates - y0[:3], axis=1))
+                parameters[:3] = candidates[nearest]
+
         # --------------------------------------------------------------
         # Central derivative
         # --------------------------------------------------------------
         #
-        # Rotation-vector coordinates are locally continuous for the
-        # small detector alignment rotations expected here.
+        # Rotation-vector coordinates use the locally continuous branch
+        # nearest the nominal transform, including half-turn orientations.
         # --------------------------------------------------------------
 
         J[

@@ -6,6 +6,12 @@ The package is currently developed for the **CBM Silicon Tracking System (STS)**
 
 The current implementation also supports **automatic geometrical segmentation of ladder point clouds into individual sensor clouds**, followed by independent robust plane fitting and surface-residual analysis.
 
+An opt-in **nominal-to-as-built rigid ladder registration** stage uses ROOT-exported
+sensor boxes, enforces all-point uncertainty-expanded containment, and writes
+transforms, diagnostics and XY/YZ/perspective overlays. See
+[REGISTRATION.md](REGISTRATION.md) for configuration, frame requirements and
+identifiability limits. It does not change the C-frame reference fit.
+
 The package is installed as:
 
 ```text
@@ -45,7 +51,8 @@ This separation between **reference-frame determination** and **as-built deviati
 
 ## 2. Current scope
 
-The repository currently implements two connected processing stages.
+The repository implements C-frame alignment and ladder/sensor metrology, with an
+optional nominal-geometry ladder-registration stage.
 
 ### C-frame alignment
 
@@ -78,6 +85,30 @@ automatic
 `automatic` reads one complete ladder cloud and performs the current geometrical sensor segmentation automatically.
 
 Both modes feed the same downstream sensor-plane fitting and visualization pipeline.
+
+### Optional rigid ladder registration
+
+Shared registration settings belong under `ladder_analysis.registration`.
+A named ladder's `registration` mapping overrides shared values field by field;
+`geometry_file` normally selects that ladder's JSON, while `measurement_frame`
+and optimizer controls can be shared. New registration classes fit a single rigid
+correction from nominal geometry to the measured ladder, with sensor relative
+placements held fixed. Every source point participates, independently of the
+segmenter's selected subsets and of `analyze_individual_sensors`. Results include
+all-point containment checks and local surface-observability diagnostics; a
+converged feasible fit is not necessarily unique. See [REGISTRATION.md](REGISTRATION.md).
+
+To inspect the starting geometry/cloud overlay **without running any fits**, use:
+
+```bash
+python -m detector_alignment.registration_preview input/u3dl/config.yaml
+```
+
+This reuses the saved scanner-to-detector matrix, applies the configured initial
+ladder pose, and writes preview-only images and diagnostics separately from fit
+products. Preview rendering defaults to 150 DPI / 20,000 displayed points per
+ladder; all-point bounds and initial statistics are retained. Verify that the
+saved matrix matches the current inputs and reference configuration.
 
 ---
 
@@ -123,10 +154,10 @@ C-frame point cloud
 robust C-frame plane fit
         |
         v
-align fitted plane normal with detector +Z
+align fitted plane normal with configured detector +Z or -Z
         |
         v
-place reference plane at detector Z = 0
+place fitted facet at detector Z = facet_offset
         |
         v
 measured reference centers
@@ -250,6 +281,8 @@ The reference C-frame measurement is configured with:
 ```yaml
 cframe:
   file: data/c_frame_facet.txt
+  normal: "+z" # "+z" (default) or "-z"
+  facet_offset: 0.75 # Target facet Z in mm; half the C-frame thickness.
 ```
 
 The input is an ASCII point cloud containing at least three numerical columns:
@@ -343,11 +376,49 @@ and parameter vector
 
 The fitted C-frame normal defines the detector-plane orientation.
 
-The fitted normal is aligned with detector `+Z`, and the corresponding reference plane is placed at:
+The fitted normal is aligned with detector `+Z` or `-Z`, selected by
+`cframe.normal`. Only the exact strings `"+z"` and `"-z"` are accepted; omitting the
+field preserves the original `"+z"` behavior. The fitted facet plane is placed at:
 
 ```text
-Z = 0
+Z = cframe.facet_offset
 ```
+
+`facet_offset` is a finite signed target coordinate in **mm**, defaulting to `0.0`
+for compatibility. When detector `Z=0` denotes the C-frame center, set this to
+half its thickness: for a 1.5 mm C-frame, use `facet_offset: 0.75`. The plane then
+lands at **Z = +0.75 mm for either normal direction**; `normal: "-z"` does not
+negate this value. Use a negative offset explicitly if the selected facet belongs
+at negative detector Z. Booleans, strings, null and non-finite values are rejected.
+This fixed geometry offset adds no thickness-uncertainty term to the covariance.
+
+For example, use `normal: "-z"` to select the opposite facet orientation. This is
+the **target normal in detector coordinates**, not a request to choose a scanner-Z
+hemisphere during the geometric fit. The fitted scanner-frame normal, inliers,
+and plane-parameter covariance retain their original convention. The leveling
+rotation, reference-point projection and Jacobians, final transform, fiducials,
+and transformed clouds all use the selected orientation. Individual sensor-plane
+fitting retains its existing default convention.
+
+The transform remains a proper right-handed rotation, not a Z reflection. The
+`"-z"` convention uses a fixed half-turn about leveled X before re-registering the
+reference centers, so in-plane axes may also change. For plane `n.p + d = 0` and
+selected sign `s = +1` or `-1`, leveling gives `Z_plane = -s*d` and the final Z
+translation is `s*d + facet_offset`. The offset changes only final Z translation,
+not the raw plane fit, rotation, reference XY registration or fixed-parameter
+covariance. Rotation-vector covariance uses the continuous local branch
+nearest the nominal transform, including when its angle is near 180 degrees.
+
+`results.json` records `plane.normal_direction`, `plane.normal_detector`, and
+`plane.facet_offset_mm`;
+`plane.normal` continues to contain the original scanner-frame normal.
+
+**After changing `cframe.normal` or `cframe.facet_offset`, recompute the C-frame
+alignment before reusing preview outputs.** The preview command only loads a
+cached matrix; it does not apply a newly selected normal or offset to that matrix. For a C-frame-only update,
+disable ladder registration (including any per-ladder opt-in overrides) before
+running `detector-align process`, then regenerate previews. Changing only the YAML
+field does not update existing matrices or transformed-cloud files.
 
 ---
 
@@ -975,6 +1046,8 @@ uncertainty:
 # C-frame reference surface.
 cframe:
   file: data/c_frame_facet.txt
+  normal: "+z"
+  facet_offset: 0.75
 
 # Optional repeated fiducial measurements in scanner coordinates.
 fiducials:
@@ -1193,6 +1266,10 @@ cframe_metrology/
 |       |-- io.py
 |       |-- ladder.py
 |       |-- ladder_viz.py
+|       |-- ladder_registration.py
+|       |-- nominal_geometry.py
+|       |-- registration_stage.py
+|       |-- registration_viz.py
 |       |-- math3d.py
 |       |-- models.py
 |       |-- pipeline.py
@@ -1217,21 +1294,25 @@ cframe_metrology/
 
 The principal responsibilities are:
 
-| Module            | Responsibility                                                                   |
-| ----------------- | -------------------------------------------------------------------------------- |
-| `pipeline.py`     | End-to-end alignment workflow and output generation                              |
-| `fiducials.py`    | Fiducial clustering, averaging, uncertainty, and affine transformation           |
-| `io.py`           | ASCII point-cloud and uncertainty loading                                        |
-| `plane.py`        | Robust plane estimation and plane uncertainty                                    |
-| `reference.py`    | Processing of directly measured reference centers                                |
-| `math3d.py`       | Rigid-transformation mathematics                                                 |
-| `uncertainty.py`  | Joint covariance construction and transformation uncertainty propagation         |
-| `ladder.py`       | Ladder/sensor cloud loading, detector transformation, caching, and plane fitting |
-| `segmentation.py` | Current automatic ladder-to-sensor segmentation                                  |
-| `ladder_viz.py`   | Sensor-plane residual visualization                                              |
-| `viz.py`          | C-frame alignment diagnostics                                                    |
-| `models.py`       | Core result/data structures                                                      |
-| `cli.py`          | `detector-align` command-line entry point                                        |
+| Module                   | Responsibility                                                                   |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| `pipeline.py`            | End-to-end alignment workflow and output generation                              |
+| `fiducials.py`           | Fiducial clustering, averaging, uncertainty, and affine transformation           |
+| `io.py`                  | ASCII point-cloud and uncertainty loading                                        |
+| `plane.py`               | Robust plane estimation and plane uncertainty                                    |
+| `reference.py`           | Processing of directly measured reference centers                                |
+| `math3d.py`              | Rigid-transformation mathematics                                                 |
+| `uncertainty.py`         | Joint covariance construction and transformation uncertainty propagation         |
+| `ladder.py`              | Ladder/sensor cloud loading, detector transformation, caching, and plane fitting |
+| `segmentation.py`        | Current automatic ladder-to-sensor segmentation                                  |
+| `nominal_geometry.py`    | Validated geo-inspector JSON sensor boxes and explicit frame/unit contract       |
+| `ladder_registration.py` | Local constrained rigid registration and observability diagnostics               |
+| `registration_stage.py`  | Opt-in pipeline adapter and per-point registration exports                       |
+| `registration_viz.py`    | Translucent nominal/fitted geometry and measured-cloud three-view overlays       |
+| `ladder_viz.py`          | Sensor-plane residual visualization                                              |
+| `viz.py`                 | C-frame alignment diagnostics                                                    |
+| `models.py`              | Core result/data structures                                                      |
+| `cli.py`                 | `detector-align` command-line entry point                                        |
 
 ---
 
@@ -1257,7 +1338,10 @@ or:
 python -m pytest
 ```
 
-The current test suite covers core point-cloud loading, pipeline registration, reference handling, rigid-registration mathematics, and uncertainty propagation.
+The current test suite covers core point-cloud loading, pipeline registration,
+reference handling, rigid-registration mathematics, uncertainty propagation, and
+nominal ladder registration including all-point containment, exported frames/units,
+observability diagnostics and three-view overlays.
 
 ---
 
@@ -1362,6 +1446,7 @@ The current repository establishes important pieces of this hierarchy:
 * detector-frame ladder point-cloud handling;
 * sensor segmentation;
 * independent sensor surface-plane measurements;
+* optional nominal-to-as-built rigid ladder corrections with all-point containment;
 * uncertainty-aware alignment products.
 
 Full sensor rigid-body alignment additionally requires reliable in-plane constraints.
@@ -1408,6 +1493,8 @@ Important current limitations include:
 
 * automatic segmentation is based on detector-frame `Z` gaps and a `Y` center line rather than a full nominal sensor geometry model;
 * sensor plane fitting does not by itself determine `Tx`, `Ty`, and `Rz`;
+* nominal ladder registration is local and may be underconstrained or face/sensor-ambiguous; containment alone does not establish unique in-plane deviations;
+* registration uses conditional point covariance but does not yet propagate common C-frame uncertainty into a ladder-pose covariance;
 * the current workflow relies on externally supplied measured reference centers rather than fitting physical reference features from raw scans;
 * instrument-specific systematic uncertainty still needs to be represented by an appropriate measurement uncertainty model;
 * the current sensor analysis is primarily surface based rather than a complete sensor-to-ladder six-degree-of-freedom alignment;
