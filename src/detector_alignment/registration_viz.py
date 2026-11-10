@@ -76,6 +76,7 @@ class RegistrationVisualizer:
         path: str | Path,
         *,
         ladder_name: str,
+        original_geometry: NominalLadder | None = None,
     ) -> Path:
         transform = rigid_matrix(initial_transform, "preview initial_transform")
         title = (
@@ -92,9 +93,14 @@ class RegistrationVisualizer:
             evaluation.residuals_mm,
             path,
             title=title,
-            pose_label="Initial sensor volumes",
+            pose_label=(
+                "Optically corrected sensor volumes"
+                if original_geometry is not None
+                else "Initial sensor volumes"
+            ),
             residual_scale=1.0,
             residual_unit="mm",
+            original_geometry=original_geometry,
         )
 
     def _plot(
@@ -110,6 +116,7 @@ class RegistrationVisualizer:
         pose_label: str,
         residual_scale: float,
         residual_unit: str,
+        original_geometry: NominalLadder | None = None,
     ) -> Path:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,12 +130,18 @@ class RegistrationVisualizer:
         shown = points[indices]
         residual_values = np.abs(residuals_mm[indices]) * residual_scale
         color_limit = max(float(np.max(np.abs(residuals_mm))) * residual_scale, 1.0)
-        nominal = [sensor.corners_mm for sensor in geometry.sensors]
-        fitted = [corners @ rotation.T + translation_mm for corners in nominal]
+        if original_geometry is not None:
+            original_by_node = {s.node_path: s for s in original_geometry.sensors}
+            if set(original_by_node) != {s.node_path for s in geometry.sensors}:
+                raise ValueError("Original ROOT geometry must contain the corrected sensor nodes")
+            nominal = [original_by_node[s.node_path].corners_mm for s in geometry.sensors]
+        else:
+            nominal = [sensor.corners_mm for sensor in geometry.sensors]
+        fitted = [s.corners_mm @ rotation.T + translation_mm for s in geometry.sensors]
         # Limits and colour scale use the full cloud, not only displayed samples.
         extent = np.vstack(
             (
-                geometry.corners_mm,
+                *nominal,
                 *fitted,
                 np.min(points, axis=0),
                 np.max(points, axis=0),
@@ -269,7 +282,15 @@ class RegistrationVisualizer:
             fig.legend(
                 handles=[
                     Line2D(
-                        [], [], color="0.4", linestyle="--", label="Nominal geometry"
+                        [],
+                        [],
+                        color="0.4",
+                        linestyle="--",
+                        label=(
+                            "Original ROOT geometry"
+                            if original_geometry is not None
+                            else "Nominal geometry"
+                        ),
                     ),
                     Patch(facecolor="tab:blue", alpha=0.22, label=pose_label),
                     Line2D(

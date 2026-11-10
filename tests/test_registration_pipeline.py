@@ -110,11 +110,11 @@ def test_registration_runs_without_sensor_analysis_and_exports_every_point(
     assert summary["final"]["outside_points"] == 0
     assert summary["final"]["surface_rms_mm"] < 1e-6
     assert summary["uncertainty_sigma"] == 3
-    assert (root / "images" / "L1_ladder_registration.png").is_file()
-    matrix = np.load(root / "matrices" / "L1_nominal_to_as_built.npy")
+    assert (root / "images" / "registration" / "L1_ladder_registration.png").is_file()
+    matrix = np.load(root / "registration" / "L1_nominal_to_as_built.npy")
     np.testing.assert_allclose(matrix, summary["homogeneous_matrix"])
     residuals = np.loadtxt(
-        root / "registrations" / "L1_point_residuals.csv", delimiter=",", skiprows=1
+        root / "registration" / "L1_point_residuals.csv", delimiter=",", skiprows=1
     )
     assert residuals.shape == (9, 7)
     np.testing.assert_allclose(residuals[:, 1:4], points, atol=1e-9)
@@ -130,7 +130,9 @@ def test_registration_drawing_can_be_disabled_without_skipping_fit(tmp_path):
     config, _ = pipeline_config(tmp_path)
     registration = config["ladder_analysis"]["L1"]["registration"]
     registration["draw"] = False
-    stale = tmp_path / "output" / "images" / "L1_ladder_registration.png"
+    stale = (
+        tmp_path / "output" / "images" / "registration" / "L1_ladder_registration.png"
+    )
     stale.parent.mkdir(parents=True)
     stale.write_bytes(b"stale")
     pipeline = AlignmentPipeline(config)
@@ -151,6 +153,13 @@ def test_disabled_registration_does_not_load_geometry_or_clouds(tmp_path, monkey
 
     monkeypatch.setattr(pipeline.loader, "load", load)
     stale_paths = [
+        tmp_path
+        / "output"
+        / "images"
+        / "registration"
+        / "L1_ladder_registration.png",
+        tmp_path / "output" / "registration" / "L1_nominal_to_as_built.npy",
+        tmp_path / "output" / "registration" / "L1_point_residuals.csv",
         tmp_path / "output" / "images" / "L1_ladder_registration.png",
         tmp_path / "output" / "matrices" / "L1_nominal_to_as_built.npy",
         tmp_path / "output" / "registrations" / "L1_point_residuals.csv",
@@ -313,8 +322,10 @@ def test_shared_registration_defaults_and_independent_ladder_overrides(tmp_path)
     assert summaries["L2"]["options"]["uncertainty_sigma"] == 2.0
     assert summaries["L1"]["options"]["max_rotation_deg"] == 1.5
     assert summaries["L2"]["options"]["max_rotation_deg"] == 1.5
-    assert (root / "images" / "L1_ladder_registration.png").is_file()
-    assert not (root / "images" / "L2_ladder_registration.png").exists()
+    assert (root / "images" / "registration" / "L1_ladder_registration.png").is_file()
+    assert not (
+        root / "images" / "registration" / "L2_ladder_registration.png"
+    ).exists()
     assert summaries["L2"]["image_file"] is None
     assert summaries["L1"]["measurement_frame"] == "global"
     assert summaries["L2"]["geometry_file"].endswith("geometry.json")
@@ -332,7 +343,9 @@ def test_local_enable_overrides_globally_disabled_registration(tmp_path):
     pipeline = AlignmentPipeline(config)
     pipeline.run()
     assert pipeline.registration_stage.results["L1"].accepted
-    assert not (tmp_path / "output/images/L1_ladder_registration.png").exists()
+    assert not (
+        tmp_path / "output/images/registration/L1_ladder_registration.png"
+    ).exists()
 
 
 def test_global_registration_disable_is_inherited(tmp_path):
@@ -362,14 +375,20 @@ def test_initial_preview_never_fits_and_preserves_existing_products(
     np.save(matrices / "transform_matrix.npy", scanner_to_detector)
     protected = [
         tmp_path / "output/results.json",
-        matrices / "L1_nominal_to_as_built.npy",
-        tmp_path / "output/images/L1_ladder_registration.png",
+        tmp_path / "output/registration/L1_nominal_to_as_built.npy",
+        tmp_path / "output/images/registration/L1_ladder_registration.png",
     ]
     for path in protected:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"existing fit product: do not modify")
     protected.append(matrices / "transform_matrix.npy")
     before = {path: path.read_bytes() for path in protected}
+    legacy_preview = (
+        tmp_path
+        / "output/images/registration_initial/L1_initial_registration.png"
+    )
+    legacy_preview.parent.mkdir(parents=True)
+    legacy_preview.write_bytes(b"stale preview")
 
     def forbidden(*args, **kwargs):
         raise AssertionError(
@@ -403,10 +422,12 @@ def test_initial_preview_never_fits_and_preserves_existing_products(
     assert Path(summary["image_file"]).stat().st_size > 1000
     saved_report = json.loads(
         (
-            tmp_path / "output/images/registration_initial/preview_summary.json"
+            tmp_path / "output/registration/preview_summary.json"
         ).read_text()
     )
     assert saved_report == report
+    assert not legacy_preview.exists()
+    assert not legacy_preview.parent.exists()
     assert all(path.read_bytes() == content for path, content in before.items())
 
 
@@ -457,3 +478,132 @@ def test_registration_refuses_mixed_uncertainty_availability(tmp_path):
     config["ladder_analysis"]["L1"]["sensors"][0]["uncertainty"] = {"mode": "none"}
     with pytest.raises(ValueError, match="covariance for all input files or none"):
         AlignmentPipeline(config).run()
+
+
+def test_preview_and_registration_share_optically_corrected_geometry(
+    tmp_path, monkeypatch
+):
+    from detector_alignment.ladder_metrology import SENSOR_FRAME, LadderMetrologyDriver
+
+    config, _ = pipeline_config(tmp_path)
+    module, assembly = "M3DL1B0001120B2", "L3DL100112"
+    config["half_unit"] = {"name": "U3DL", "assembly_naming": "STS8"}
+    config["ladder_metrology"] = {
+        "enabled": True,
+        "source_dir": "source",
+        "output_dir": "optical",
+        "sensor_frame": SENSOR_FRAME,
+    }
+    ladder = config["ladder_analysis"]["L1"]
+    ladder["assembly_ladder"] = assembly
+    ladder["registration"]["draw"] = False
+    ladder["registration"]["optical_sensor_map"] = {
+        module: {
+            "node_path": "/ladder/sensor",
+            "sensor_to_geometry": np.eye(4).tolist(),
+        }
+    }
+    deviation = np.eye(4)
+    deviation[2, 3] = 0.1
+    payload = {
+        "input_fingerprint": "current",
+        "result_digest": "result",
+        "ladders": {
+            assembly: {"sensors": {module: {"nominal_to_measured": deviation.tolist()}}}
+        },
+    }
+    calls = []
+
+    def producer(self, *, check_only=False):
+        calls.append(check_only)
+        return payload
+
+    monkeypatch.setattr(LadderMetrologyDriver, "run", producer)
+    original = deepcopy(config)
+    pipeline = AlignmentPipeline(config)
+    pipeline.run()
+    summary = json.loads((tmp_path / "output/results.json").read_text())[
+        "ladder_registrations"
+    ]["L1"]
+    assert summary["optical_metrology"]["applied"]
+    np.testing.assert_allclose(
+        summary["optical_metrology"]["corrected_sensors"][0]["center_mm"], [0, 0, 0.1]
+    )
+    # A single partial plane constrains normal displacement, not in-plane shifts.
+    assert summary["homogeneous_matrix"][2][3] == pytest.approx(0.1, abs=1e-6)
+    monkeypatch.setattr(
+        LadderRegistrar,
+        "fit",
+        lambda *a, **k: pytest.fail("Preview refitted registration"),
+    )
+    report = RegistrationPreview(pipeline).run(dpi=50, sample_size=3, require_optical=True)
+    preview = report["ladders"]["L1"]
+    assert preview["optical_metrology"] == summary["optical_metrology"]
+    np.testing.assert_allclose(
+        preview["original_root_bounds_mm"]["min"], [-10, -15, -0.15]
+    )
+    np.testing.assert_allclose(
+        preview["original_root_bounds_mm"]["max"], [10, 15, 0.15]
+    )
+    np.testing.assert_allclose(
+        preview["initial_geometry_bounds_mm"]["min"], [-10, -15, -0.05]
+    )
+    np.testing.assert_allclose(
+        preview["initial_geometry_bounds_mm"]["max"], [10, 15, 0.25]
+    )
+    assert calls == [False, True]
+    assert config == original
+
+
+def test_preview_uses_uncorrected_root_geometry_without_explicit_optical_mapping(
+    tmp_path, monkeypatch
+):
+    from detector_alignment.ladder_metrology import SENSOR_FRAME, LadderMetrologyDriver
+
+    config, _ = pipeline_config(tmp_path)
+    config["half_unit"] = {"name": "U3DL", "assembly_naming": "STS8"}
+    config["ladder_metrology"] = {
+        "enabled": True,
+        "source_dir": "source",
+        "output_dir": "optical",
+        "sensor_frame": SENSOR_FRAME,
+    }
+    payload = {
+        "input_fingerprint": "current",
+        "result_digest": "result",
+        "ladders": {"L3DL100112": {"sensors": {}}},
+    }
+    calls = []
+
+    def producer(self, *, check_only=False):
+        calls.append(check_only)
+        return payload
+
+    monkeypatch.setattr(LadderMetrologyDriver, "run", producer)
+    matrices = tmp_path / "output/matrices"
+    matrices.mkdir(parents=True)
+    np.save(matrices / "transform_matrix.npy", np.eye(4))
+
+    report = RegistrationPreview(AlignmentPipeline(config)).run(dpi=50, sample_size=3)
+    preview = report["ladders"]["L1"]
+    optical = preview["optical_metrology"]
+    assert not optical["applied"]
+    assert optical["reason"] == "no_explicit_ladder_sensor_mapping"
+    assert optical["input_fingerprint"] == "current"
+    np.testing.assert_allclose(
+        preview["initial_geometry_bounds_mm"]["min"], [-10, -15, -0.15]
+    )
+    np.testing.assert_allclose(
+        preview["initial_geometry_bounds_mm"]["max"], [10, 15, 0.15]
+    )
+    assert Path(preview["image_file"]) == (
+        tmp_path / "output/images/registration/L1_initial_registration.png"
+    )
+    assert Path(report["summary_file"]) == (
+        tmp_path / "output/registration/preview_summary.json"
+    )
+    assert calls == [True]
+    with pytest.raises(ValueError, match="requires corrected optical geometry"):
+        RegistrationPreview(AlignmentPipeline(config)).run(
+            dpi=50, sample_size=3, require_optical=True
+        )

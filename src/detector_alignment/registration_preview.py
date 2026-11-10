@@ -35,6 +35,7 @@ class RegistrationPreview:
         dpi: int = 150,
         sample_size: int = 20_000,
         ladder_names: list[str] | None = None,
+        require_optical: bool = False,
     ) -> dict:
         pipeline = self.pipeline
         output_root = pipeline._resolve(pipeline.config.get("output_dir", "output"))
@@ -73,11 +74,15 @@ class RegistrationPreview:
             raise ValueError(
                 "No ladders with configured geometry are available for preview."
             )
-        destination = (
-            pipeline._resolve(output_dir)
-            if output_dir is not None
-            else output_root / "images" / "registration_initial"
-        ).resolve()
+        pipeline.geometry_preparation.prepare(preview=True)
+        if output_dir is not None:
+            destination = pipeline._resolve(output_dir).resolve()
+            image_destination = result_destination = destination
+        else:
+            image_destination = (output_root / "images" / "registration").resolve()
+            result_destination = (output_root / "registration").resolve()
+        image_destination.mkdir(parents=True, exist_ok=True)
+        result_destination.mkdir(parents=True, exist_ok=True)
         visualizer = RegistrationVisualizer(
             dpi=dpi,
             sample_size=sample_size,
@@ -91,9 +96,11 @@ class RegistrationPreview:
             "scanner_to_detector_matrix": matrix.tolist(),
             "display_sample_size": sample_size,
             "dpi": dpi,
+            "image_directory": str(image_destination),
             "warnings": [
                 "Saved C-frame transform reused, not recomputed: verify it matches the current measurement inputs/configuration.",
                 "Geometry-frame identity and measured detector-frame equivalence are not physically verified by this preview.",
+                "Optical corrections are applied only to ladders with explicit assembly_ladder and optical_sensor_map configuration; other ladders use uncorrected ROOT nominal geometry.",
             ],
             "ladders": {},
         }
@@ -107,10 +114,27 @@ class RegistrationPreview:
                 flush=True,
             )
             geometry_path = pipeline._resolve(registration["geometry_file"]).resolve()
-            geometry = NominalLadder.from_json(
-                geometry_path,
-                expected_frame=registration["measurement_frame"],
+            apply_optical = (
+                ladder_config.get("assembly_ladder") is not None
+                or registration.get("optical_sensor_map") is not None
             )
+            geometry, preparation = pipeline.geometry_preparation.load(
+                ladder_config,
+                registration,
+                apply_optical=apply_optical,
+                ladder_name=name,
+            )
+            if require_optical and not preparation["optical_metrology"]["applied"]:
+                raise ValueError(
+                    f"Preview {name} requires corrected optical geometry; "
+                    f"{preparation['optical_metrology']['reason']}"
+                )
+            if not preparation["optical_metrology"]["applied"]:
+                print(
+                    f"Preview {name}: using uncorrected ROOT nominal geometry "
+                    f"({preparation['optical_metrology']['reason']})",
+                    flush=True,
+                )
             points, covariances, input_files = pipeline.registration_stage.load_inputs(
                 ladder_config,
                 alignment,
@@ -134,8 +158,15 @@ class RegistrationPreview:
                 initial,
             )
             corners = geometry.corners_mm @ initial[:3, :3].T + initial[:3, 3]
+            original = (
+                NominalLadder.from_json(
+                    geometry_path, expected_frame=registration["measurement_frame"]
+                )
+                if preparation["optical_metrology"]["applied"]
+                else None
+            )
             image_path = (
-                destination
+                image_destination
                 / f"{pipeline.ladder_visualizer._safe_name(name)}_initial_registration.png"
             )
             visualizer.plot_initial(
@@ -145,9 +176,12 @@ class RegistrationPreview:
                 initial,
                 image_path,
                 ladder_name=name,
+                original_geometry=original,
             )
             report["ladders"][name] = {
                 "geometry_file": str(geometry_path),
+                "root_geometry": preparation["root_geometry"],
+                "optical_metrology": preparation["optical_metrology"],
                 "geometry_node": geometry.node_path,
                 "geometry_frame": geometry.frame,
                 "measured_frame": "detector frame defined by the saved scanner-to-detector matrix",
@@ -163,6 +197,13 @@ class RegistrationPreview:
                     "min": corners.min(axis=0).tolist(),
                     "max": corners.max(axis=0).tolist(),
                 },
+                "original_root_bounds_mm": (
+                    {
+                        "min": original.corners_mm.min(axis=0).tolist(),
+                        "max": original.corners_mm.max(axis=0).tolist(),
+                    }
+                    if original is not None else None
+                ),
                 "surface_rms_mm": evaluation.rms_mm,
                 "surface_max_abs_mm": float(np.max(np.abs(evaluation.residuals_mm))),
                 "outside_points": int(
@@ -176,9 +217,23 @@ class RegistrationPreview:
                 "image_file": str(image_path),
             }
             print(f"Preview {name}: wrote {image_path}", flush=True)
-        summary_path = destination / "preview_summary.json"
+        summary_path = result_destination / "preview_summary.json"
+        report["summary_file"] = str(summary_path)
         with summary_path.open("w", encoding="utf-8") as stream:
             json.dump(report, stream, indent=2, allow_nan=False)
+        if output_dir is None:
+            legacy_destination = output_root / "images" / "registration_initial"
+            for name in selected:
+                legacy_path = (
+                    legacy_destination
+                    / f"{pipeline.ladder_visualizer._safe_name(name)}_initial_registration.png"
+                )
+                legacy_path.unlink(missing_ok=True)
+            (legacy_destination / "preview_summary.json").unlink(missing_ok=True)
+            try:
+                legacy_destination.rmdir()
+            except OSError:
+                pass
         print(f"Preview summary: {summary_path}", flush=True)
         return report
 
@@ -193,6 +248,10 @@ def main(argv=None):
     parser.add_argument("--dpi", type=int, default=150)
     parser.add_argument("--sample-size", type=int, default=20_000)
     parser.add_argument(
+        "--require-optical", action="store_true",
+        help="Fail instead of plotting uncorrected ROOT geometry",
+    )
+    parser.add_argument(
         "--ladder",
         action="append",
         dest="ladder_names",
@@ -205,6 +264,7 @@ def main(argv=None):
         dpi=args.dpi,
         sample_size=args.sample_size,
         ladder_names=args.ladder_names,
+        require_optical=args.require_optical,
     )
 
 

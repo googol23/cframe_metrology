@@ -1,9 +1,10 @@
 # Nominal-to-as-built ladder registration
 
 This opt-in stage fits **one rigid correction per ladder**, holding the relative
-sensor positions, orientations and dimensions fixed. It does not change the
-C-frame alignment or refit individual sensor placements. It is independent of
-the existing sensor-plane analysis.
+sensor positions, orientations and dimensions fixed **after optional optical
+geometry preparation**. It does not change the C-frame alignment or refit
+individual sensor placements. It is independent of the existing sensor-plane
+analysis.
 
 ## Inputs and coordinate contract
 
@@ -31,8 +32,151 @@ the existing sensor-plane analysis.
    must be a sensor-surface measurement. Both modes match against the union of
    nominal sensors; measured sensor names are not guessed to be geometry IDs.
 
-Registration requires no ROOT runtime and adds no package dependencies. ROOT is
-only needed upstream when producing the geometry export.
+The numerical registration implementation does not import ROOT. When
+`root_geometry.enabled`, normal pipeline processing first invokes the independent
+`geo_inspector` package in a configured external Python/ROOT environment; preview
+and `mode: reuse` validate its published manifest without running ROOT. Optional
+optical analysis likewise runs in its own configured interpreter.
+
+## Nominal ROOT geometry and optical correction
+
+For U3DL half-unit work, use either the dataset-local
+**`PointCloudMetrology/input/u3dl/config.yaml`** or the equivalent workspace-oriented
+**`sts_tools/config.yaml`**. Both contain the laser settings, `half_unit`,
+`root_geometry`, and `ladder_metrology`; their relative paths are rebased to their
+own directories but resolve to the same inputs and `output/U3DL` hierarchy. Other
+configurations remain supported when either external stage is absent or disabled.
+
+`RootGeometryDriver` executes `python -m geo_inspector ladder ...` through a
+bounded, shell-free subprocess. The ROOT source file, node selector, frame,
+interpreter, working directory, ROOT executable and output directory are all
+explicit configuration. Extraction occurs in a sibling staging directory. The
+driver validates the machine-readable receipt and every geo-inspector JSON with
+the package's ROOT-independent nominal-geometry reader before replacing
+`root_geo`. Its manifest records source/config fingerprints and per-file hashes.
+Failed extraction leaves the last valid batch untouched. When enabled, each
+`registration.geometry_file` must be one of the files in that validated manifest.
+No manufacturing ladder name, ROOT copy index or node is inferred.
+
+`LadderMetrologyDriver` executes `python -m sts_ladder_metrology.main --config ...`
+through a bounded, shell-free subprocess. `execution.working_dir` controls where
+that module is launched, while all input/output paths still resolve from the YAML.
+The driver does not import the optical package, open its database, load its
+fiducials or implement its fits. The optical producer owns inventory discovery,
+grouping, fitting, origin/axes conversion, covariance and freshness checking. See
+`../sts_ladder_metrology/README.md` for its schema.
+
+The data boundary is explicit: the producer atomically writes
+`ladder_metrology.result_file`, emits a JSON receipt naming that path and its
+fingerprint/digest, and the consumer rejects any receipt, schema, identity, frame,
+coverage or digest mismatch before preparing geometry. A normal consumer-driven
+run stores combined producer stdout/stderr in `execution.log` next to the result.
+The legacy `output_dir` form remains readable as
+`output_dir/sensor_transforms.json`, but new configurations should use
+`result_file` and must not specify both.
+
+Normal processing executes ROOT inspection and optical production when their
+blocks are enabled with `mode: run`; `reuse` validates existing artifacts without
+regeneration. Preparation occurs even when ladder registration is disabled,
+allowing a later preview to use the generated nominal and optical results. An
+absent or disabled block preserves compatibility and does not execute that stage.
+
+Preview **only checks/reuses** existing ROOT and optical results, regardless of
+`mode`. It never runs ROOT extraction or fits optical, C-frame, sensor-plane or
+ladder-registration parameters. Optical checking still needs its interpreter,
+source files and current read-only assembly snapshot. Missing, stale, mismatched or
+failed results cause errors, not fallback to uncorrected geometry.
+
+The U3DL nominal-geometry block is structurally:
+
+```yaml
+root_geometry:
+  enabled: true
+  source_file: /path/to/sts_v26a.geo.root
+  node: Unit04L_10
+  frame: node
+  output_dir: output/U3DL/root_geo
+  mode: run
+  execution:
+    python: /path/to/python
+    working_dir: sts_geo_utils
+    root: /path/to/root
+    timeout_seconds: 120
+```
+
+`frame: node` makes the actual selected ROOT node path the exported
+`measurement_frame`; for the current file this is `/sts_v26a/Unit04L_10`.
+
+Each corrected point-cloud ladder uses its configured ladder key as its STS8
+assembly identity; `assembly_ladder` may override that key when different. Its
+effective `registration` block must contain `optical_sensor_map`. An explicit per-module mapping associates
+**every assembly module** one-to-one with **every ROOT sensor box**, with exactly
+these fields:
+
+- `node_path`: the exact ROOT sensor path from the geometry export.
+- `sensor_to_geometry`: a 4x4 orthogonal coordinate-basis conversion, translation
+  in mm, from the optical nominal sensor frame to that ROOT sensor box's local
+  frame. Explicit axis reflections (determinant -1) are allowed here, since the
+  legacy survey X/Y swap reverses parity. Scaling/shearing are rejected. The
+  optical deviation itself and the corrected ROOT pose must remain proper rigid
+  transforms; rotations are converted by conjugation, never by swapping vector
+  components.
+
+Alternatively, `optical_sensor_map: {mode: y_order, sensor_to_geometry: <4x4>}`
+resolves module-to-node identities from sorted nominal ROOT sensor-centre Y. It
+orders assembly `B` modules from outermost to centre (highest index to zero),
+then `T` modules from centre outward (zero to highest index); the position digit
+immediately after B/T is used even if subsequent name digits vary. It requires
+consecutive indices on both sides, equal side counts, distinct ROOT Y coordinates,
+and negative/positive Y on the corresponding sides. The resolved mapping is
+recorded in `optical_metrology.sensor_mapping`. A 4x4 bridge here applies to
+all sensors. For the U3DL centre-origin ladder-axis convention, use
+`optical_sensor_map: {mode: y_order, sensor_to_geometry: ladder_aligned_box_center}`.
+This derives each sensor's basis as `ROOT_box_rotation.T @ ladder_rotation`,
+with zero translation. The top boxes define ladder axes; all top rotations must
+agree, and bottom boxes must be rotated 180° around local Z relative to the top.
+The preview fails if the exported geometry violates this convention. No
+half-thickness offset is applied: the user-specified optical correction origin
+is the ROOT box centre, although measured fiducials lie on its surface.
+
+For other sensor-frame conventions, provide explicit per-module bridges; identity
+is valid only when both origins and axes coincide. The Y-order association and
+bridge do not by themselves validate the saved C-frame alignment.
+
+For nominal ROOT sensor pose `T0`, optical sensor-local nominal-to-measured
+transform `Delta`, and optical-local -> ROOT-box-local bridge `B`:
+
+```text
+Delta_box = B @ Delta @ inverse(B)
+T_corrected = T0 @ Delta_box
+T_final = G_ladder @ T_corrected
+```
+
+`LadderGeometryPreparation` always loads the original geometry JSON and returns
+new oriented boxes. Dimensions stay fixed; centres, rotations, corners and bounds
+reflect the sensor deviations. Repeated preparation cannot apply a correction
+twice and never modifies the source export. The ladder-local origin is not
+inferred and need not be reconstructed for this sensor-local composition.
+
+Both `LadderRegistrationStage` and `RegistrationPreview` use this same preparation
+component. For explicitly mapped ladders, preview's initial pose and registration's
+optimized pose act **after** the optical correction, so their baseline/dashed
+geometry is optically corrected. An unmapped preview instead uses the untouched
+ROOT nominal geometry and records that optical correction was not applied. Their
+JSON records `root_geometry` manifest/source/file provenance and
+`optical_metrology`, including input/result digests and, when applied, mapping and
+corrected poses. The fitted ladder matrix describes the additional
+common placement of this corrected geometry, not a substitute for the individual
+optical transformations. Optical covariance is retained in the producer artifact
+but is **not propagated** into registration; those results are conditional on the
+prepared geometry.
+
+The workspace U3DL assembly inventory has 3 ladders (10, 10, 6 sensors).
+Y-order association has been checked against those three exported ROOT ladders;
+it does not by itself verify the detector/C-frame equivalence or the bridge.
+These are deliberately not assigned to `L3DL*` manufacturing IDs. Registration
+remains disabled, and corrected preview requires verified assembly/module/ROOT
+mappings and valid geometry files before it can succeed.
 
 ## Inspect the initial pose without running registration
 
@@ -61,6 +205,16 @@ frame conversion or fitted correction is introduced to make the objects overlap.
 The title warns that geometry/measurement physical frame equivalence is not
 verified. Each selected ladder must have valid geometry/frame fields; an explicit
 preview ignores the registration `enabled` and `draw` switches without changing them.
+If both `assembly_ladder` and `registration.optical_sensor_map` are configured,
+preview applies the validated optical correction. With `--require-optical`, preview
+fails rather than plotting uncorrected boxes; use this switch when inspecting
+corrected nominal positions. Its dashed outlines show the original ROOT boxes
+and its blue volumes show corrected boxes at the configured initial ladder pose;
+`original_root_bounds_mm` and `initial_geometry_bounds_mm` are separately recorded.
+If neither mapping is configured, the default preview shows uncorrected ROOT
+nominal geometry and records
+`optical_metrology.applied: false` with the reason. A partial mapping remains an
+error; preview never guesses an assembly or ROOT sensor association.
 
 Preview-specific defaults are **150 DPI** and **20,000 displayed points per
 ladder**, independent of potentially expensive production rendering settings.
@@ -68,9 +222,11 @@ Bounds, RMS, containment counts and total-point counts use every source point;
 sampling affects only display. Outputs are isolated in:
 
 ```text
-output_dir/images/registration_initial/
-  <ladder>_initial_registration.png
-  preview_summary.json
+output_dir/
+├── images/registration/
+│   └── <ladder>_initial_registration.png
+└── registration/
+    └── preview_summary.json
 ```
 
 The JSON records the saved alignment matrix and path, initial poses, input files,
@@ -222,16 +378,16 @@ For each configured ladder `<name>`, the pipeline writes:
   provenance, before/after RMS and maximum surface residual, outside-point count,
   maximum containment violation, nearest-surface sensor counts, convergence,
   acceptance, observability and warnings.
-- `matrices/<name>_nominal_to_as_built.npy`: the 4x4 correction, including a
+- `registration/<name>_nominal_to_as_built.npy`: the 4x4 correction, including a
   **diagnostic candidate** when the fit is not accepted. Always check the JSON
   status before using it downstream.
-- `registrations/<name>_point_residuals.csv`: one row per input point, preserving
+- `registration/<name>_point_residuals.csv`: one row per input point, preserving
   input-file/row order. Columns are point index, detector-frame XYZ in mm,
   nearest-surface sensor index, signed surface distance in mm, and containment
   margin in mm. Sensor indices refer to the geometry JSON sensor order and the
   JSON summary's sensor list. The nearest surface and the sensor with the best
   expanded-box containment need not be the same in overlap regions.
-- `images/<name>_ladder_registration.png`: **XY, YZ and perspective** in one image,
+- `images/registration/<name>_ladder_registration.png`: **XY, YZ and perspective** in one image,
   with measured points coloured by surface distance, dashed nominal outlines,
   and translucent fitted sensor volumes. YZ uses labelled independent axis
   scales; perspective expands the Z display scale when necessary and labels it.

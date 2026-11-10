@@ -12,6 +12,16 @@ transforms, diagnostics and XY/YZ/perspective overlays. See
 [REGISTRATION.md](REGISTRATION.md) for configuration, frame requirements and
 identifiability limits. It does not change the C-frame reference fit.
 
+For U3DL half-unit processing, **`input/u3dl/config.yaml`** contains the laser
+survey, external optical metrology, and external ROOT-geometry inspection settings;
+the equivalent workspace-oriented configuration remains available as
+**`../config.yaml`**. `RootGeometryDriver` uses `geo_inspector` to build validated
+nominal ladder JSON from the explicitly configured ROOT file/node, while
+`ladder_metrology.result_file` identifies the schema-version-1 optical boundary.
+Shared geometry preparation validates both sources and applies sensor-local
+nominal-to-measured transforms to explicitly mapped ladders before preview and
+registration; neither ROOT inspection nor optical fitting is duplicated here. See [REGISTRATION.md](REGISTRATION.md).
+
 The package is installed as:
 
 ```text
@@ -108,7 +118,14 @@ This reuses the saved scanner-to-detector matrix, applies the configured initial
 ladder pose, and writes preview-only images and diagnostics separately from fit
 products. Preview rendering defaults to 150 DPI / 20,000 displayed points per
 ladder; all-point bounds and initial statistics are retained. Verify that the
-saved matrix matches the current inputs and reference configuration.
+saved matrix matches the current inputs and reference configuration. Preview
+checks/reuses the prepared optical artifact and applies optical corrections to
+ladders with `optical_sensor_map` configuration. The ladder key is the default
+assembly identity; `assembly_ladder` can override it. For the U3DL centre-origin
+ladder-axis convention, Y-order mapping resolves ROOT sensor nodes and derives
+box-local rotations from their inspected poses. Use `--require-optical` to reject
+uncorrected fallback. Preview never refits optical or registration parameters;
+check that the saved C-frame matrix still matches the current inputs.
 
 ---
 
@@ -1134,7 +1151,35 @@ which should be treated as the current executable configuration example.
 
 ## 25. Numerical alignment products
 
-The output directory contains the scanner-to-detector alignment products, including files such as:
+U3DL uses one shared half-unit output root:
+
+```text
+../output/U3DL/
+├── ladder_metrology/
+│   ├── sensor_transforms.json
+│   ├── execution.log
+│   └── <STS8-LADDER>/analysis.json
+├── root_geo/
+│   ├── manifest.json
+│   ├── execution.log
+│   └── Ladder_*.json
+├── results.json
+├── registration/                  # Fit matrices/residuals + preview summary
+├── images/
+│   └── registration/              # Fitted and initial registration images
+├── logs/
+├── matrices/                      # Scanner-to-detector and non-registration matrices
+└── point_clouds/
+```
+
+`root_geo/manifest.json` records the ROOT source hash, explicit node/frame,
+exported ladder paths/sensor counts, per-file hashes and a result digest. The
+inspector runs into a staging directory; only a fully validated batch replaces the
+previous `root_geo`. Preview and `mode: reuse` validate the manifest/files without
+running ROOT. `ladder_metrology/sensor_transforms.json` remains the aggregate
+consumer contract; every STS8 ladder also receives its own checked `analysis.json`.
+
+The configured pipeline output directory also contains scanner-to-detector alignment products, including files such as:
 
 ```text
 results.json
@@ -1267,9 +1312,11 @@ cframe_metrology/
 |       |-- ladder.py
 |       |-- ladder_viz.py
 |       |-- ladder_registration.py
+|       |-- ladder_metrology.py
 |       |-- nominal_geometry.py
 |       |-- registration_stage.py
 |       |-- registration_viz.py
+|       |-- root_geometry.py
 |       |-- math3d.py
 |       |-- models.py
 |       |-- pipeline.py
@@ -1306,6 +1353,8 @@ The principal responsibilities are:
 | `ladder.py`              | Ladder/sensor cloud loading, detector transformation, caching, and plane fitting |
 | `segmentation.py`        | Current automatic ladder-to-sensor segmentation                                  |
 | `nominal_geometry.py`    | Validated geo-inspector JSON sensor boxes and explicit frame/unit contract       |
+| `root_geometry.py`       | External geo-inspector execution, staged publication and manifest validation     |
+| `ladder_metrology.py`    | External optical execution and corrected nominal-geometry preparation            |
 | `ladder_registration.py` | Local constrained rigid registration and observability diagnostics               |
 | `registration_stage.py`  | Opt-in pipeline adapter and per-point registration exports                       |
 | `registration_viz.py`    | Translucent nominal/fitted geometry and measured-cloud three-view overlays       |

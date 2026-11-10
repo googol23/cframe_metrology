@@ -21,6 +21,7 @@ class LadderRegistrationStage:
         "measurement_frame",
         "initial_transform",
         "draw",
+        "optical_sensor_map",
     }
 
     def __init__(
@@ -29,6 +30,7 @@ class LadderRegistrationStage:
         resolve_path,
         logger,
         *,
+        geometry_preparation=None,
         dpi=200,
         sample_size=50_000,
         random_seed=42,
@@ -38,6 +40,7 @@ class LadderRegistrationStage:
         self.logger = logger
         self.visualizer = RegistrationVisualizer(dpi, sample_size, random_seed)
         self.results = {}
+        self.geometry_preparation = geometry_preparation
 
     @classmethod
     def validate_config(cls, config: dict | None, *, partial: bool = False) -> bool:
@@ -122,24 +125,41 @@ class LadderRegistrationStage:
 
     def run(self, ladder_configs, alignment, outdir: Path, default_uncertainty) -> dict:
         self.results.clear()
+        if self.geometry_preparation is not None:
+            self.geometry_preparation.prepare()
         summaries = {}
         for ladder_name, ladder_config in ladder_configs:
             config = ladder_config.get("registration")
             prefix = LadderVisualizer._safe_name(ladder_name)
-            image_path = outdir / "images" / f"{prefix}_ladder_registration.png"
-            matrix_path = outdir / "matrices" / f"{prefix}_nominal_to_as_built.npy"
-            residual_path = outdir / "registrations" / f"{prefix}_point_residuals.csv"
+            image_path = (
+                outdir / "images" / "registration" / f"{prefix}_ladder_registration.png"
+            )
+            matrix_path = outdir / "registration" / f"{prefix}_nominal_to_as_built.npy"
+            residual_path = outdir / "registration" / f"{prefix}_point_residuals.csv"
+            legacy_paths = (
+                outdir / "images" / f"{prefix}_ladder_registration.png",
+                outdir / "matrices" / f"{prefix}_nominal_to_as_built.npy",
+                outdir / "registrations" / f"{prefix}_point_residuals.csv",
+            )
             # Remove only the known products of disabled, still-configured ladders.
             if not self.validate_config(config):
-                for path in (image_path, matrix_path, residual_path):
+                for path in (image_path, matrix_path, residual_path, *legacy_paths):
                     path.unlink(missing_ok=True)
                 continue
             self.logger.info("Pipeline | task=register_ladder | ladder=%s", ladder_name)
-            geometry_path = self.resolve_path(config["geometry_file"])
-            geometry = NominalLadder.from_json(
-                geometry_path,
-                expected_frame=config["measurement_frame"],
-            )
+            geometry_path = self.resolve_path(config["geometry_file"]).resolve()
+            preparation = {
+                "root_geometry": {"managed": False},
+                "optical_metrology": {"applied": False},
+            }
+            if self.geometry_preparation is None:
+                geometry = NominalLadder.from_json(
+                    geometry_path, expected_frame=config["measurement_frame"]
+                )
+            else:
+                geometry, preparation = self.geometry_preparation.load(
+                    ladder_config, config, ladder_name=ladder_name
+                )
             points, covariances, input_files = self.load_inputs(
                 ladder_config,
                 alignment,
@@ -159,6 +179,8 @@ class LadderRegistrationStage:
             summary.update(
                 {
                     "geometry_file": str(geometry_path),
+                    "root_geometry": preparation["root_geometry"],
+                    "optical_metrology": preparation["optical_metrology"],
                     "input_files": input_files,
                     "point_order": "input_files order, preserving numeric row order in each file",
                     "options": asdict(options),
@@ -209,4 +231,6 @@ class LadderRegistrationStage:
                 )
             else:
                 image_path.unlink(missing_ok=True)
+            for path in legacy_paths:
+                path.unlink(missing_ok=True)
         return summaries

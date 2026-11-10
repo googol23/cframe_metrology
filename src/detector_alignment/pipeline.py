@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from threading import Thread
+
 import json
 import logging
 import multiprocessing
@@ -18,6 +20,7 @@ from .fiducials import (
 )
 from .io import AsciiPointCloudLoader
 from .ladder import LadderProcessor, SensorPlaneResult
+from .ladder_metrology import LadderGeometryPreparation, LadderMetrologyDriver
 from .ladder_viz import (
     LadderVisualizer,
     PreparedIndividualResidualPlot,
@@ -28,6 +31,7 @@ from .models import AlignmentResult
 from .plane import RobustPlaneFitter
 from .reference import MeasuredReferenceProcessor, MeasuredReferenceResult
 from .registration_stage import LadderRegistrationStage
+from .root_geometry import RootGeometryDriver
 from .segmentation import segment_ladder
 from .uncertainty import (
     build_joint_covariance,
@@ -51,14 +55,16 @@ class AlignmentPipeline:
 
         output/
         ├── results.json
+        ├── registration/
         ├── images/
+        │   └── registration/
         ├── logs/
         ├── matrices/
         └── point_clouds/
 
-    Diagnostic images, numerical matrix products, and transformed point clouds
-    are kept separate. The machine-readable results.json remains directly in
-    the output root.
+    Registration-specific numerical products and images are grouped separately
+    from the scanner-to-detector matrices and other diagnostics. The
+    machine-readable results.json remains directly in the output root.
     """
 
     _LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
@@ -248,11 +254,31 @@ class AlignmentPipeline:
             os.cpu_count() or 1,
         )
 
-        self._ladder_configs()
+        self.ladder_metrology_driver: LadderMetrologyDriver
+        def run_ladder_metrology(self):
+            self._ladder_configs()
+            self.ladder_metrology_driver = LadderMetrologyDriver(
+                config, self._resolve, self._logger
+            )
+        t1 = Thread(target=run_ladder_metrology, args=(self,))
+
+        self.root_geometry_driver = RootGeometryDriver(
+            config, self._resolve, self._logger
+        )
+
+        t1.start()
+        t1.join()
+
+        self.geometry_preparation = LadderGeometryPreparation(
+            self.ladder_metrology_driver,
+            self._resolve,
+            root_geometry_driver=self.root_geometry_driver,
+        )
         self.registration_stage = LadderRegistrationStage(
             self.loader,
             self._resolve,
             self._logger,
+            geometry_preparation=self.geometry_preparation,
             dpi=ladder_viz_cfg.get("dpi", v_cfg.get("dpi", 600)),
             sample_size=ladder_viz_cfg.get(
                 "sample_size", v_cfg.get("sample_size", 50_000)
@@ -591,7 +617,7 @@ class AlignmentPipeline:
             )
 
     def run(self) -> AlignmentResult:
-        outdir = self._resolve(self.config.get("output_dir", "output"))
+        outdir = self._resolve(self.config.get("output_dir", "output")).resolve()
         log_path = self._configure_logging(outdir)
         config_source = self.config.get("_config_path", "<in-memory>")
         self._logger.info(
@@ -609,9 +635,13 @@ class AlignmentPipeline:
         # ------------------------------------------------------------------
         # Output structure
         #
-        # output/
+        # output/<half-unit>/
+        # ├── ladder_metrology/
+        # ├── root_geo/
         # ├── results.json
+        # ├── registration/
         # ├── images/
+        # │   └── registration/
         # ├── logs/
         # ├── matrices/
         # └── point_clouds/
@@ -821,8 +851,9 @@ class AlignmentPipeline:
             uncertainty_default,
         )
 
-        # results.json -> output/
-        # *.npy        -> output/matrices/
+        # results.json                         -> output/
+        # scanner-to-detector and covariance   -> output/matrices/
+        # registration matrices/residuals      -> output/registration/
         self._log_task(
             "write_numerical_results",
             destination=outdir / "results.json",
