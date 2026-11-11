@@ -279,6 +279,21 @@ python -m detector_alignment.cli process examples/config.yaml
 
 Configuration paths are resolved relative to the directory containing the YAML configuration file.
 
+The stage-oriented configuration in [`examples/config.yaml`](examples/config.yaml) is
+canonical: `io` owns `output_dir` and `output_precision`; `half_unit` owns the
+scanner-survey uncertainty, C-frame measurements (`cframe.fiducials`,
+`cframe.plane_fit`, `cframe.references`, `cframe.reference_points`), and the
+`ladders` point-cloud inventory. Top-level `registration` owns fit controls and
+per-ladder nominal geometry/optical mapping under `registration.ladders`.
+`ladder_analysis` owns sensor-plane analysis controls and its visualization
+settings. `visualization`, `ladder_metrology`, and `root_geometry` keep their own
+blocks. Relative paths retain the YAML file's directory as their base.
+
+Older top-level C-frame/uncertainty/output examples and ladder entries inside
+`ladder_analysis` below illustrate the **supported legacy layout**, not the
+recommended layout. Mixing legacy and stage-oriented locations for the same
+field, or mixing legacy ladder entries with `half_unit.ladders`, is rejected.
+
 The command prints the final rotation matrix, translation vector, and propagated one-standard-deviation uncertainties:
 
 ```text
@@ -643,19 +658,25 @@ are translations in millimetres.
 
 Ladder processing is optional.
 
-Enable it with:
+Declare measured ladders once, then enable sensor-plane analysis independently:
 
 ```yaml
+half_unit:
+  ladders:
+    L3DL0:
+      segmentation:
+        mode: automatic
+      file: data/L3DL0.txt
 ladder_analysis:
   enabled: true
-
-  L3DL0:
-    segmentation:
-      mode: automatic
-    file: data/L3DL0.txt
 ```
 
-Every key below `ladder_analysis` other than the shared options (`enabled`, `analyze_individual_sensors`, `sensor_plane_fit`, `visualization`, and `write_individual_plots`) is a ladder name. At least one named ladder is required when analysis is enabled. Each ladder has its own segmentation mode and input files, so automatic and pre-segmented inputs can be mixed in one run. The former single-ladder shape, with `segmentation`, `file`, or `sensors` directly below `ladder_analysis`, is rejected.
+Each ladder has its own segmentation mode and input files, so automatic and
+pre-segmented inputs can be mixed. With `ladder_analysis.enabled: false`,
+transformed cloud exports and configured registration remain available. Legacy
+named ladder entries below `ladder_analysis` are still accepted, but must not
+be mixed with `half_unit.ladders`. The former single-ladder shape, with
+`segmentation`, `file`, or `sensors` directly below `ladder_analysis`, is rejected.
 
 The C-frame alignment is always solved first.
 
@@ -1043,7 +1064,9 @@ Disabling drawing never disables loading, segmentation, plane fitting, numerical
 
 ## 24. Automatic ladder segmentation
 
-The following illustrates the current intended workflow:
+The following is a complete **legacy-layout** example retained for existing
+configurations. For new configurations use `examples/config.yaml` and the
+stage-oriented layout described above:
 
 ```yaml
 # All lengths are millimetres.

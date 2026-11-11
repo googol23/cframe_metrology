@@ -248,30 +248,37 @@ select multiple ladders. See the module's `--help` for all arguments.
 
 ## Configuration
 
-Put shared settings in `ladder_analysis.registration`, and use a named ladder's
-`registration` mapping for field-by-field overrides:
+Keep measured point-cloud inputs in `half_unit.ladders` and nominal geometry
+and fit controls in the top-level `registration` stage. Per-ladder registration
+fields override shared fields, independently of `ladder_analysis.enabled`:
 
 ```yaml
-ladder_analysis:
+half_unit:
+  ladders:
+    L3DL0:
+      file: data/L3DL0.txt
+      segmentation:
+        mode: automatic
+registration:
   enabled: true
-  analyze_individual_sensors: false # Registration still runs.
-  registration:
-    enabled: true
-    measurement_frame: global
-    uncertainty_sigma: 3.0
-    containment_tolerance_mm: 1.0e-6
-    max_translation_mm: 5.0
-    max_rotation_deg: 5.0
-    max_iterations: 300
-    draw: true
-  L3DL0:
-    file: data/L3DL0.txt
-    segmentation:
-      mode: automatic
-    registration:
+  measurement_frame: global
+  uncertainty_sigma: 3.0
+  containment_tolerance_mm: 1.0e-6
+  max_translation_mm: 5.0
+  max_rotation_deg: 5.0
+  max_iterations: 300
+  draw: true
+  ladders:
+    L3DL0:
       geometry_file: data/L3DL0_geometry.json
-      max_translation_mm: 2.0 # Overrides only this field; other fields are inherited.
+      max_translation_mm: 2.0 # Overrides only this field.
+ladder_analysis:
+  enabled: false # Registration and transformed cloud exports still run.
 ```
+
+Legacy `ladder_analysis.registration` and per-ladder registration mappings
+remain accepted for existing configurations, but cannot be mixed with the new
+half-unit ladder inventory.
 
 **Use `global` only if ROOT global really is the measured detector frame.** For a
 half-unit/C-frame export, replace it with that export's full `reference_node`.
@@ -283,8 +290,8 @@ row. No source configuration mapping is mutated. Every registration field can be
 shared or overridden, including `geometry_file`, `measurement_frame`, `enabled`
 and `draw`; geometry paths normally belong in per-ladder blocks.
 
-If a ladder omits its block, it inherits the shared block unchanged. If both
-blocks are absent, registration is disabled, preserving existing configurations.
+If a ladder omits its registration block, it inherits the shared block unchanged.
+If both blocks are absent, registration is disabled, preserving existing configurations.
 Set per-ladder `enabled: false` to opt out of a globally enabled stage, or
 per-ladder `enabled: true` to opt into a globally disabled stage. An empty mapping
 inherits fields; a YAML `null` registration block behaves like an absent block,
@@ -313,7 +320,8 @@ not limits on vector magnitude. Use a suitable `initial_transform` for larger
 known displacements. Plot DPI, sample size and seed inherit the existing
 `ladder_analysis.visualization` / top-level `visualization` settings.
 
-Point uncertainty uses the existing file/global `uncertainty` configuration.
+Point uncertainty uses `half_unit.uncertainty` by default; a point-cloud entry
+may override it. Legacy top-level `uncertainty` remains accepted.
 Covariances must be symmetric and positive semidefinite. All concatenated input
 files must have covariance, or all must omit it; mixed availability is rejected.
 Without covariance, boxes are unexpanded and a warning is recorded.

@@ -1,47 +1,9 @@
-# All lengths are millimetres.
-output_dir: output
-output_precision: 6
-
+# Paths are relative to this YAML file; all lengths are millimetres.
 io:
+  output_dir: output
+  output_precision: 6
   comment_prefixes: ["#", "//", "$"]
   delimiter: whitespace
-
-# Default measurement uncertainty. Each reference may override this block.
-uncertainty:
-  mode: constant
-  sigma_xyz_mm: [0.008, 0.008, 0.008]
-
-cframe:
-  file: data/c_frame_facet.txt
-  normal: "+z" # Aligned facet normal: "+z" (default) or "-z".
-  facet_offset: 0.75 # Target facet Z in mm; half the C-frame thickness (default: 0.0).
-
-# Optional measured C-frame fiducials. Rows may be comma-, space-, or
-# tab-separated. Repeated measurements closer than the configured minimum
-# marker separation are clustered and averaged. This example inherits the
-# global uncertainty above; add fiducials.uncertainty to override it.
-fiducials:
-  file: data/cframe_fiducials.xyz
-  fiducial_min_distance: 5.0
-  draw: true
-  # Matplotlib marker examples: "x", "+", "o", "^", "s", "D", "*"
-  marker: "x"
-
-plane_fit:
-  ransac_iterations: 600
-  ransac_threshold_mm: 0.05
-  random_seed: 23
-
-# Each reference file contains exactly one measured XYZ center point.
-# nominal_center is the corresponding detector-coordinate [X, Y].
-references:
-  - file: data/hole_1.xyz
-    nominal_center: [0.0, 0.0]
-  - file: data/hole_2.xyz
-    nominal_center: [0.0, 500.0]
-
-reference_points:
-  derivative_step_rad: 1.0e-7
 
 visualization:
   dpi: 600
@@ -53,48 +15,63 @@ visualization:
     full_ladders: true
     all_ladders_and_cframe: true
 
-# Optional named ladders transformed by the final registration. Each ladder
-# independently selects automatic segmentation or pre-segmented sensor files.
+half_unit:
+  name: example
+  assembly_naming: STS8
+  # Scanner-survey uncertainty shared by facet, references and ladder clouds.
+  # Individual facet, fiducial, reference, ladder or sensor entries may override it.
+  uncertainty:
+    mode: constant
+    sigma_xyz_mm: [0.008, 0.008, 0.008]
+  cframe:
+    file: data/c_frame_facet.txt
+    normal: "+z"
+    facet_offset: 0.75
+    fiducials:
+      file: data/cframe_fiducials.xyz
+      fiducial_min_distance: 5.0
+      draw: true
+      marker: "x"
+    plane_fit:
+      ransac_iterations: 600
+      ransac_threshold_mm: 0.05
+      random_seed: 23
+    references:
+      - file: data/hole_1.xyz
+        nominal_center: [0.0, 0.0]
+      - file: data/hole_2.xyz
+        nominal_center: [0.0, 500.0]
+    reference_points:
+      derivative_step_rad: 1.0e-7
+  ladders:
+    L3DL0:
+      segmentation:
+        mode: automatic
+        config:
+          z_gap_mm: 0.3
+          min_points_per_sensor: 50
+      file: data/L3DL0.txt
+    L3DL1:
+      segmentation:
+        mode: segmented_files
+      sensors:
+        - { name: L1T0, file: data/L1T0.txt }
+        - { name: L1T1, file: data/L1T1.txt }
+
+# Optional nominal registration. When enabled, each participating ladder needs
+# a geometry_file and an exact measurement_frame matching its ROOT export.
+# registration:
+#   enabled: true
+#   measurement_frame: global
+#   uncertainty_sigma: 3.0 # Multiplier of point-cloud sigma, not a second sigma.
+#   draw: true
+#   ladders:
+#     L3DL0:
+#       geometry_file: data/L3DL0_geometry.json
+#       max_translation_mm: 2.0
+
 ladder_analysis:
   enabled: true
   analyze_individual_sensors: true
-  # Optional shared nominal-registration settings. Uncomment together with each
-  # ladder's geometry_file block below. Paths are relative to this YAML file.
-  # measurement_frame must equal the export's exact reference_node (or 'global')
-  # AND physically coincide with the pipeline's detector/C-frame coordinates.
-  # registration:
-  #   enabled: true
-  #   measurement_frame: global
-  #   uncertainty_sigma: 3.0
-  #   containment_tolerance_mm: 1.0e-6
-  #   max_translation_mm: 5.0
-  #   max_rotation_deg: 5.0
-  #   max_iterations: 300
-  #   draw: true
   visualization:
-    # Effective workers = min(configured value, logical CPUs, pending sensor plots).
     individual_plot_workers: 4
-
-  L3DL0:
-    segmentation:
-      mode: automatic
-      config:
-        z_gap_mm: 0.3
-        # y_center_mm: 0.0
-        min_points_per_sensor: 50
-    file: data/L3DL0.txt
-    # Per-ladder fields override shared settings one field at a time.
-    # geometry_file is a geo-inspector ladder JSON export (cm converted to mm).
-    # No ladder-name -> ROOT-node mapping or frame conversion is guessed.
-    # registration:
-    #   geometry_file: data/L3DL0_geometry.json
-    #   max_translation_mm: 2.0 # Other shared fields remain inherited.
-
-  # L3DL1:
-  #   segmentation:
-  #     mode: segmented_files
-  #   sensors:
-  #     - name: L1T0
-  #       file: data/L1T0.txt
-  #     - name: L1T1
-  #       file: data/L1T1.txt

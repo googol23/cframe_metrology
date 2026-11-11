@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from threading import Thread
 
 import json
 import logging
@@ -97,11 +96,99 @@ class AlignmentPipeline:
         }
     )
 
+    @classmethod
+    def _normalize_config(cls, config: dict) -> dict:
+        """Adapt stage-oriented YAML to the existing internal stage interfaces."""
+        normalized = dict(config)
+        io = config.get("io", {})
+        if not isinstance(io, dict):
+            raise ValueError("'io' must be a YAML mapping.")
+        for key in ("output_dir", "output_precision"):
+            if key in io:
+                if key in config:
+                    raise ValueError(f"Use either io.{key} or top-level {key}, not both.")
+                normalized[key] = io[key]
+
+        half = config.get("half_unit", {})
+        if not isinstance(half, dict):
+            raise ValueError("'half_unit' must be a YAML mapping.")
+        if "uncertainty" in half:
+            if "uncertainty" in config:
+                raise ValueError("Use either half_unit.uncertainty or top-level uncertainty, not both.")
+            normalized["uncertainty"] = half["uncertainty"]
+        cframe = half.get("cframe")
+        if cframe is not None:
+            if not isinstance(cframe, dict):
+                raise ValueError("'half_unit.cframe' must be a YAML mapping.")
+            for key in ("fiducials", "plane_fit", "references", "reference_points"):
+                if key in cframe:
+                    if key in config:
+                        raise ValueError(f"Use either half_unit.cframe.{key} or top-level {key}, not both.")
+                    normalized[key] = cframe[key]
+            if "cframe" in config:
+                raise ValueError("Use either half_unit.cframe or top-level cframe, not both.")
+            normalized["cframe"] = {
+                key: value for key, value in cframe.items()
+                if key not in {"fiducials", "plane_fit", "references", "reference_points"}
+            }
+
+        inventory = half.get("ladders")
+        registration = config.get("registration")
+        if inventory is not None or registration is not None:
+            if not isinstance(inventory, dict):
+                raise ValueError("half_unit.ladders must be a YAML mapping when using stage registration.")
+            if registration is not None and not isinstance(registration, dict):
+                raise ValueError("'registration' must be a YAML mapping.")
+            registration = registration or {}
+            overrides = registration.get("ladders", {})
+            if not isinstance(overrides, dict):
+                raise ValueError("registration.ladders must be a YAML mapping.")
+            unknown = set(overrides) - set(inventory)
+            if unknown:
+                raise ValueError(f"Registration references unknown half-unit ladders: {sorted(unknown)}")
+            analysis = config.get("ladder_analysis") or {}
+            if not isinstance(analysis, dict):
+                raise ValueError("'ladder_analysis' must be a YAML mapping.")
+            if "registration" in analysis or set(analysis) - cls._LADDER_GLOBAL_KEYS:
+                raise ValueError("Do not mix legacy ladder_analysis ladders/registration with half_unit.ladders.")
+            defaults = (
+                {key: value for key, value in registration.items() if key != "ladders"}
+                if config.get("registration") is not None else None
+            )
+            if not defaults:
+                defaults = None
+            ladders = {}
+            for name, value in inventory.items():
+                if name in cls._LADDER_GLOBAL_KEYS:
+                    raise ValueError(f"Reserved half_unit.ladders name: {name!r}.")
+                if not isinstance(value, dict):
+                    raise ValueError(f"half_unit.ladders.{name} must be a mapping.")
+                if "registration" in value:
+                    raise ValueError(f"Put registration settings in registration.ladders.{name}.")
+                unexpected = set(value) - {
+                    "file", "sensors", "segmentation", "uncertainty", "assembly_ladder"
+                }
+                if unexpected:
+                    raise ValueError(
+                        f"Unknown half_unit.ladders.{name} options: {sorted(unexpected)}"
+                    )
+                ladders[name] = dict(value)
+                if name in overrides:
+                    ladders[name]["registration"] = overrides[name]
+            normalized["ladder_analysis"] = {**analysis, "enabled": True, **ladders}
+            if defaults is not None:
+                normalized["ladder_analysis"]["registration"] = defaults
+        return normalized
+
     def __init__(self, config: dict):
         if not isinstance(config, dict):
             raise TypeError("config must be a mapping.")
 
-        self.config = config
+        analysis = config.get("ladder_analysis")
+        self._analyze_ladders_enabled = (
+            analysis.get("enabled", False) if isinstance(analysis, dict) else False
+        )
+        self.config = config = self._normalize_config(config)
         cframe_cfg = config.get("cframe", {})
         if not isinstance(cframe_cfg, dict):
             raise ValueError("'cframe' must be a YAML mapping.")
@@ -254,20 +341,13 @@ class AlignmentPipeline:
             os.cpu_count() or 1,
         )
 
-        self.ladder_metrology_driver: LadderMetrologyDriver
-        def run_ladder_metrology(self):
-            self._ladder_configs()
-            self.ladder_metrology_driver = LadderMetrologyDriver(
-                config, self._resolve, self._logger
-            )
-        t1 = Thread(target=run_ladder_metrology, args=(self,))
-
+        self._ladder_configs()
+        self.ladder_metrology_driver = LadderMetrologyDriver(
+            config, self._resolve, self._logger
+        )
         self.root_geometry_driver = RootGeometryDriver(
             config, self._resolve, self._logger
         )
-
-        t1.start()
-        t1.join()
 
         self.geometry_preparation = LadderGeometryPreparation(
             self.ladder_metrology_driver,
@@ -660,7 +740,7 @@ class AlignmentPipeline:
         if not self.visualization_draw["cframe"]:
             self._remove_cframe_diagnostics(images_dir)
         self._remove_disabled_ladder_diagnostics(images_dir)
-        if not self.analyze_individual_sensors:
+        if not self.analyze_individual_sensors or not self._analyze_ladders_enabled:
             self._remove_ladder_analysis_diagnostics(images_dir)
         if not self.visualization_draw["all_ladders_and_cframe"]:
             self._remove_generated_image(
@@ -978,11 +1058,11 @@ class AlignmentPipeline:
     ) -> dict[str, list[SensorPlaneResult]]:
         """Process every configured ladder independently."""
         ladder_configs = self._ladder_configs()
-        if not ladder_configs:
+        if not ladder_configs or not self._analyze_ladders_enabled:
             self._log_task(
                 "analyze_ladders",
                 action="skip",
-                reason="not_configured",
+                reason=("not_configured" if not ladder_configs else "stage_disabled"),
             )
             return {}
         if not self.analyze_individual_sensors:
