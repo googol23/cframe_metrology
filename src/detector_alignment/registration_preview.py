@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from .ladder_registration import LadderRegistrar, RegistrationOptions
+from .ladder_registration import RegistrationOptions, SensorBoxEvaluator
 from .nominal_geometry import NominalLadder, rigid_matrix
 from .pipeline import AlignmentPipeline
 from .registration_stage import LadderRegistrationStage
@@ -151,7 +151,7 @@ class RegistrationPreview:
                     if key in registration
                 }
             )
-            evaluation = LadderRegistrar(options).evaluate_initial(
+            evaluation = SensorBoxEvaluator(options).evaluate_initial(
                 geometry,
                 points,
                 covariances,

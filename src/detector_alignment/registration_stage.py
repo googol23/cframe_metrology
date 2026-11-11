@@ -1,4 +1,4 @@
-"""Opt-in pipeline adapter for nominal ladder registration."""
+"""Opt-in rigid ladder registration against optically corrected sensor facets."""
 
 from __future__ import annotations
 
@@ -9,12 +9,10 @@ from time import perf_counter
 import numpy as np
 
 from .ladder_registration import RegistrationOptions
-from .registration_diagnostics import (
-    InstrumentedNearestBoxRegistrar, registration_heartbeat,
-)
+from .registration_diagnostics import registration_heartbeat
 from .labeled_registration import LabeledFaceRegistrar
 from .ladder_viz import LadderVisualizer
-from .nominal_geometry import NominalLadder, rigid_matrix
+from .nominal_geometry import rigid_matrix
 from .registration_viz import RegistrationVisualizer
 
 
@@ -27,7 +25,6 @@ class LadderRegistrationStage:
         "initial_transform",
         "draw",
         "optical_sensor_map",
-        "mode",
         "facet_z_mm",
         "outlier_sigma",
         "pairing_tolerance_mm",
@@ -58,6 +55,11 @@ class LadderRegistrationStage:
             return False
         if not isinstance(config, dict):
             raise ValueError("Ladder registration must be a mapping.")
+        if "mode" in config:
+            raise ValueError(
+                "registration.mode is no longer supported; remove it. Registration "
+                "always fits assigned, optically corrected sensor facets."
+            )
         unknown = set(config) - cls._CONFIG_KEYS
         if unknown:
             raise ValueError(f"Unknown ladder registration options: {sorted(unknown)}")
@@ -71,8 +73,6 @@ class LadderRegistrationStage:
                 continue
             if not isinstance(config.get(key), str) or not config[key].strip():
                 raise ValueError(f"registration.{key} must be a non-empty string.")
-        if config.get("mode", "nearest_boxes") not in ("nearest_boxes", "labeled_faces"):
-            raise ValueError("registration.mode must be nearest_boxes or labeled_faces")
         for key in ("facet_z_mm", "outlier_sigma", "pairing_tolerance_mm", "diagnostic_interval_s"):
             if key in config:
                 value = config[key]
@@ -108,7 +108,13 @@ class LadderRegistrationStage:
 
     def load_inputs(self, ladder_config: dict, alignment, default_uncertainty, *,
                     geometry=None, pairing_tolerance_mm=15.0, initial_transform=None):
-        """Load all source points and covariances in the fixed detector frame."""
+        """Load all rows; geometry requests fixed sensor labels for registration.
+
+        Without geometry this is a preview-only load, which also permits an
+        unsegmented cloud. Enabled registration always supplies corrected geometry.
+        """
+        if geometry is not None and ladder_config["segmentation"]["mode"] != "segmented_files":
+            raise ValueError("Registration requires one segmented input file per sensor")
         if ladder_config["segmentation"]["mode"] == "automatic":
             inputs = [
                 (
@@ -144,10 +150,8 @@ class LadderRegistrationStage:
         input_files = [str(cloud.source) for cloud in clouds]
         if geometry is None:
             return points, covariances, input_files
-        if ladder_config["segmentation"]["mode"] != "segmented_files":
-            raise ValueError("labeled_faces requires one input file per sensor")
         if len(clouds) != len(geometry.sensors):
-            raise ValueError("labeled_faces requires exactly one cloud per ROOT sensor")
+            raise ValueError("Registration requires exactly one cloud per ROOT sensor")
         transformed = [cloud.points @ alignment.rotation.T + alignment.translation
                        for cloud in clouds]
         measured_y = np.array([np.median(cloud[:, 1]) for cloud in transformed])
@@ -193,29 +197,19 @@ class LadderRegistrationStage:
                     path.unlink(missing_ok=True)
                 continue
             stage_started = perf_counter()
-            self.logger.info("Pipeline | task=register_ladder | ladder=%s | mode=%s", ladder_name, config.get("mode", "nearest_boxes"))
+            self.logger.info("Pipeline | task=register_ladder | ladder=%s", ladder_name)
             geometry_path = self.resolve_path(config["geometry_file"]).resolve()
-            preparation = {
-                "root_geometry": {"managed": False},
-                "optical_metrology": {"applied": False},
-            }
-            labeled = config.get("mode", "nearest_boxes") == "labeled_faces"
-            if labeled and self.geometry_preparation is None:
+            if self.geometry_preparation is None:
                 raise ValueError(
-                    "labeled_faces requires optical geometry preparation; "
+                    "Registration requires optical geometry preparation; "
                     "uncorrected ROOT sensor boxes cannot be used for fitting"
                 )
-            if self.geometry_preparation is None:
-                geometry = NominalLadder.from_json(
-                    geometry_path, expected_frame=config["measurement_frame"]
-                )
-            else:
-                geometry, preparation = self.geometry_preparation.load(
-                    ladder_config, config, ladder_name=ladder_name
-                )
-            if labeled and preparation.get("optical_metrology", {}).get("applied") is not True:
+            geometry, preparation = self.geometry_preparation.load(
+                ladder_config, config, ladder_name=ladder_name
+            )
+            if preparation.get("optical_metrology", {}).get("applied") is not True:
                 raise ValueError(
-                    "labeled_faces requires optically corrected nominal sensor "
+                    "Registration requires optically corrected nominal sensor "
                     "geometry; enable optical metrology and provide an explicit "
                     "optical_sensor_map for every sensor"
                 )
@@ -226,11 +220,11 @@ class LadderRegistrationStage:
                 ladder_config,
                 alignment,
                 default_uncertainty,
-                geometry=geometry if labeled else None,
+                geometry=geometry,
                 pairing_tolerance_mm=config.get("pairing_tolerance_mm", 15.0),
                 initial_transform=config.get("initial_transform"),
             )
-            points, covariances, input_files = loaded[:3]
+            points, covariances, input_files, sensor_indices = loaded
             load_seconds = perf_counter() - load_started
             self.logger.info(
                 "Ladder %s registration | phase=load | points=%d | sensors=%d | files=%d | covariance=%s | elapsed_s=%.3f | optical_corrected=%s",
@@ -239,38 +233,18 @@ class LadderRegistrationStage:
                 preparation.get("optical_metrology", {}).get("applied") is True,
             )
             interval = float(config.get("diagnostic_interval_s", 15.0))
-            if not labeled:
-                self.logger.warning(
-                    "Ladder %s registration | mode=nearest_boxes | "
-                    "optimized_labeled_faces=False | points=%d | sensors=%d | "
-                    "hint=set registration.mode=labeled_faces to use compressed fitting",
-                    ladder_name, len(points), len(geometry.sensors),
-                )
             options = RegistrationOptions(
                 **{key: config[key] for key in self._OPTION_KEYS if key in config}
             )
-            if labeled:
-                with registration_heartbeat(self.logger, ladder_name,
-                                            "labeled_faces_fit", interval):
-                    result = LabeledFaceRegistrar(
-                        options,
-                        facet_z_mm=config.get("facet_z_mm", 0.0),
-                        outlier_sigma=config.get("outlier_sigma", 3.0),
-                        logger=self.logger,
-                    ).fit(geometry, points, loaded[3], covariances,
-                          config.get("initial_transform"))
-            else:
-                registrar = InstrumentedNearestBoxRegistrar(options)
-                with registration_heartbeat(self.logger, ladder_name,
-                                            "nearest_boxes_fit", interval, registrar):
-                    result = registrar.fit(
-                        geometry, points, covariances, config.get("initial_transform")
-                    )
-                self.logger.info(
-                    "Ladder %s registration | phase=nearest_boxes_fit | "
-                    "evaluate_calls=%d | evaluate_seconds=%.3f",
-                    ladder_name, registrar.evaluate_calls, registrar.evaluate_seconds,
-                )
+            with registration_heartbeat(self.logger, ladder_name,
+                                        "sensor_facets_fit", interval):
+                result = LabeledFaceRegistrar(
+                    options,
+                    facet_z_mm=config.get("facet_z_mm", 0.0),
+                    outlier_sigma=config.get("outlier_sigma", 3.0),
+                    logger=self.logger,
+                ).fit(geometry, points, sensor_indices, covariances,
+                      config.get("initial_transform"))
             self.results[ladder_name] = result
             summary = result.summary(geometry)
             summary.update(
@@ -278,17 +252,16 @@ class LadderRegistrationStage:
                     "geometry_file": str(geometry_path),
                     "root_geometry": preparation["root_geometry"],
                     "optical_metrology": preparation["optical_metrology"],
-                    "registration_reference_geometry": (
-                        "optically_corrected_nominal_sensors"
-                        if labeled else "prepared_nominal_sensors"
-                    ),
+                    "registration_reference_geometry": "optically_corrected_nominal_sensors",
                     "input_files": input_files,
                     "point_order": "input_files order, preserving numeric row order in each file",
                     "options": asdict(options),
                     "input_loading_seconds": load_seconds,
-                    "registration_mode": config.get("mode", "nearest_boxes"),
-                    "facet_z_mm": config.get("facet_z_mm", 0.0) if labeled else None,
-                    "outlier_sigma": config.get("outlier_sigma", 3.0) if labeled else None,
+                    # Fixed output marker retained for existing export consumers;
+                    # it is not a selectable registration mode.
+                    "registration_mode": "labeled_faces",
+                    "facet_z_mm": config.get("facet_z_mm", 0.0),
+                    "outlier_sigma": config.get("outlier_sigma", 3.0),
                     "initial_transform": config.get(
                         "initial_transform", np.eye(4).tolist()
                     ),
@@ -315,8 +288,7 @@ class LadderRegistrationStage:
             matrix_path.parent.mkdir(parents=True, exist_ok=True)
             np.save(matrix_path, result.homogeneous)
             residual_path.parent.mkdir(parents=True, exist_ok=True)
-            inlier_mask = (result.final.inlier_mask if labeled else
-                           np.ones(len(points), dtype=bool))
+            inlier_mask = result.final.inlier_mask
             np.savetxt(
                 residual_path,
                 np.column_stack(
@@ -326,15 +298,12 @@ class LadderRegistrationStage:
                         result.final.sensor_indices,
                         result.final.residuals_mm,
                         result.final.containment_margin_mm,
-                        *((inlier_mask.astype(int),) if labeled else ()),
+                        inlier_mask.astype(int),
                     )
                 ),
                 delimiter=",",
-                fmt=["%d", "%.12g", "%.12g", "%.12g", "%d", "%.12g", "%.12g"] +
-                    (["%d"] if labeled else []),
-                header=("point_index,x_mm,y_mm,z_mm,assigned_sensor_index,signed_surface_distance_mm,containment_margin_mm,used_for_fit"
-                        if labeled else
-                        "point_index,x_mm,y_mm,z_mm,nearest_surface_sensor_index,signed_surface_distance_mm,containment_margin_mm"),
+                fmt=["%d", "%.12g", "%.12g", "%.12g", "%d", "%.12g", "%.12g", "%d"],
+                header="point_index,x_mm,y_mm,z_mm,assigned_sensor_index,signed_surface_distance_mm,containment_margin_mm,used_for_fit",
                 comments="",
             )
             export_seconds = perf_counter() - export_started
@@ -345,7 +314,8 @@ class LadderRegistrationStage:
             plot_started = perf_counter()
             if config.get("draw", True):
                 self.visualizer.plot(
-                    geometry, points, result, image_path, ladder_name=ladder_name
+                    geometry, points, result, image_path, ladder_name=ladder_name,
+                    covariances=covariances, facet_z_mm=config.get("facet_z_mm", 0.0),
                 )
             else:
                 image_path.unlink(missing_ok=True)
@@ -360,7 +330,7 @@ class LadderRegistrationStage:
             self.logger.info(
                 "Ladder %s registration | phase=complete | total_stage_s=%.3f | fit_s=%s | export_s=%.3f | plot_s=%.3f | plot_written=%s | csv_rows=%d",
                 ladder_name, perf_counter() - stage_started,
-                (f"{result.performance['total_seconds']:.3f}" if labeled else "not_instrumented"),
+                f"{result.performance['total_seconds']:.3f}",
                 export_seconds, plot_seconds, bool(config.get("draw", True)), len(points),
             )
         return summaries

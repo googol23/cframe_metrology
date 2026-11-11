@@ -76,7 +76,7 @@ def test_stage_yaml_preserves_alignment_uncertainty_paths_and_exports(tmp_path):
     assert "L1" not in json.loads((tmp_path / "new_output/results.json").read_text()).get("ladder_registrations", {})
 
 
-def test_enabled_registration_runs_with_ladder_analysis_disabled(tmp_path):
+def test_enabled_registration_runs_with_ladder_analysis_disabled(tmp_path, monkeypatch):
     new = stage_case(legacy_case(tmp_path))
     new["ladder_analysis"]["enabled"] = False
     new["registration"] = {
@@ -90,6 +90,25 @@ def test_enabled_registration_runs_with_ladder_analysis_disabled(tmp_path):
                      "dimensions": [20, 20, 0.3], "rotation": np.eye(3).tolist()}],
     }
     (tmp_path / "geometry.json").write_text(json.dumps(geometry))
+    from detector_alignment.ladder_metrology import SENSOR_FRAME, LadderMetrologyDriver
+    new["half_unit"].update(name="U3DL")
+    new["half_unit"]["ladders"]["L1"]["assembly_ladder"] = "L3DL100112"
+    new["ladder_metrology"] = {
+        "enabled": True, "source_dir": "source", "output_dir": "optical",
+        "sensor_frame": SENSOR_FRAME,
+    }
+    new["registration"]["ladders"]["L1"]["optical_sensor_map"] = {
+        "M3DL1B0001120B2": {"node_path": "/ladder/sensor",
+                            "sensor_to_geometry": np.eye(4).tolist()}
+    }
+    deviation = np.eye(4)
+    deviation[2, 3] = 0.1
+    monkeypatch.setattr(LadderMetrologyDriver, "run", lambda self, **kwargs: {
+        "input_fingerprint": "current", "result_digest": "result",
+        "ladders": {"L3DL100112": {"sensors": {
+            "M3DL1B0001120B2": {"nominal_to_measured": deviation.tolist()}
+        }}},
+    })
     path = tmp_path / "stages.yaml"
     path.write_text(yaml.safe_dump(new))
     pipeline = AlignmentPipeline.from_yaml(path)
@@ -141,4 +160,6 @@ def test_dataset_config_uses_stage_sections_and_resolves_paths():
     assert len(config["half_unit"]["ladders"]["L3DL100112"]["sensors"]) == 10
     assert config["half_unit"]["uncertainty"]["sigma_xyz_mm"] == [0.05] * 3
     assert pipeline._resolve(config["io"]["output_dir"]) == (path.parent / "../../../output/U3DL")
-    assert pipeline._ladder_configs()[0][1]["registration"]["mode"] == "labeled_faces"
+    registration = pipeline._ladder_configs()[0][1]["registration"]
+    assert "mode" not in registration
+    assert registration["optical_sensor_map"]["mode"] == "y_order"

@@ -53,7 +53,7 @@ def test_labeled_stage_fails_closed_without_optical_preparation(tmp_path):
 
     stage = LadderRegistrationStage(None, lambda path: tmp_path / path,
                                     logging.getLogger("optical-check"))
-    ladder = {"registration": {"enabled": True, "mode": "labeled_faces",
+    ladder = {"registration": {"enabled": True,
                  "geometry_file": "unused.json", "measurement_frame": "/cframe"}}
     with pytest.raises(ValueError, match="requires optical geometry preparation"):
         stage.run([("L1", ladder)], None, tmp_path, None)
@@ -97,7 +97,7 @@ def test_labeled_stage_receives_optically_corrected_geometry(tmp_path, monkeypat
     stage.load_inputs = lambda *args, **kwargs: (
         np.zeros((3, 3)), None, ["sensor.xyz"], np.zeros(3, dtype=int))
     monkeypatch.setattr(registration_stage, "LabeledFaceRegistrar", CaptureFit)
-    ladder = {"registration": {"enabled": True, "mode": "labeled_faces",
+    ladder = {"registration": {"enabled": True,
                  "geometry_file": "unused.json", "measurement_frame": "/cframe"}}
     with pytest.raises(RuntimeError, match="corrected geometry reached optimizer"):
         stage.run([("L1", ladder)], None, tmp_path, None)
@@ -120,7 +120,7 @@ def test_labeled_stage_rejects_uncorrected_preparation(tmp_path):
     stage = LadderRegistrationStage(None, lambda path: tmp_path / path,
                                     logging.getLogger("no-optical"),
                                     geometry_preparation=Preparation())
-    ladder = {"registration": {"enabled": True, "mode": "labeled_faces",
+    ladder = {"registration": {"enabled": True,
                  "geometry_file": "unused.json", "measurement_frame": "/cframe"}}
     with pytest.raises(ValueError, match="requires optically corrected nominal sensor"):
         stage.run([("L1", ladder)], None, tmp_path, None)
@@ -157,3 +157,66 @@ def test_pca_eigendecomposition_rejects_single_remote_outlier():
     mask = _plane_inliers(cloud, 3.0, np.array([0, 0, 1.]))
     assert not mask[-1]
     assert mask[:-1].sum() > 1150
+
+
+def test_sensor_correspondence_is_fixed_by_file_and_corrected_geometry(tmp_path):
+    import logging
+    from types import SimpleNamespace
+    from detector_alignment.io import AsciiPointCloudLoader
+    from detector_alignment.registration_stage import LadderRegistrationStage
+
+    # Deliberately reverse ROOT order relative to the measured file order.
+    geometry = NominalLadder("/ladder", "/cframe", tuple(
+        NominalSensor(f"/ladder/s{i}", np.array([0., y, 2.]),
+                      np.array([20., 18., 0.3]), np.eye(3))
+        for i, y in enumerate((30., -30.))
+    ))
+    clouds = [np.array([[x, y + offset, 2.15] for x in (-2., 0., 2.)
+                       for offset in (-2., 0., 2.)]) for y in (-30., 30.)]
+    for i, cloud in enumerate(clouds):
+        np.savetxt(tmp_path / f"s{i}.xyz", cloud)
+    ladder = {"segmentation": {"mode": "segmented_files"}, "sensors": [
+        {"name": f"measured_{i}", "file": f"s{i}.xyz"} for i in range(2)
+    ]}
+    stage = LadderRegistrationStage(AsciiPointCloudLoader(), lambda p: tmp_path / p,
+                                    logging.getLogger("pairing"))
+    alignment = SimpleNamespace(rotation=np.eye(3), translation=np.zeros(3))
+    points, covariance, files, ids = stage.load_inputs(
+        ladder, alignment, None, geometry=geometry)
+    np.testing.assert_array_equal(points, np.vstack(clouds))
+    np.testing.assert_array_equal(ids, np.repeat([1, 0], 9))
+    assert len(files) == 2
+    result = LabeledFaceRegistrar().fit(geometry, points, ids, covariance)
+    np.testing.assert_array_equal(result.initial.sensor_indices, ids)
+    np.testing.assert_array_equal(result.final.sensor_indices, ids)
+
+    import pytest
+    with pytest.raises(ValueError, match="exactly one cloud per ROOT sensor"):
+        stage.load_inputs({**ladder, "sensors": ladder["sensors"][:1]},
+                          alignment, None, geometry=geometry)
+    for i, cloud in enumerate(clouds):
+        np.savetxt(tmp_path / f"s{i}.xyz", cloud + [0., 100., 0.])
+    with pytest.raises(ValueError, match="pairing tolerance"):
+        stage.load_inputs(ladder, alignment, None, geometry=geometry)
+    np.savetxt(tmp_path / "s1.xyz", clouds[0] + [0., 100., 0.])
+    with pytest.raises(ValueError, match="Ambiguous overlapping"):
+        stage.load_inputs(ladder, alignment, None, geometry=geometry)
+
+
+def test_facet_residuals_never_switch_to_a_nearer_sensor():
+    geometry = NominalLadder("/ladder", "/cframe", tuple(
+        NominalSensor(f"/ladder/s{i}", np.array([0., 0., z]),
+                      np.array([20., 18., 0.3]), np.eye(3))
+        for i, z in enumerate((2., 4.))
+    ))
+    # Each cloud is placed on the OTHER sensor. Labels must not be reassigned.
+    xy = np.array([[x, y] for x in (-2., 0., 2.) for y in (-2., 0., 2.)])
+    points = np.vstack([np.column_stack((xy, np.full(9, z))) for z in (4.15, 2.15)])
+    ids = np.repeat([0, 1], 9)
+    result = LabeledFaceRegistrar().fit(geometry, points, ids)
+    np.testing.assert_array_equal(result.initial.sensor_indices, ids)
+    np.testing.assert_array_equal(result.final.sensor_indices, ids)
+    np.testing.assert_allclose(result.initial.residuals_mm, np.repeat([2., -2.], 9))
+    assert not result.accepted
+    assert not result.feasible
+    assert result.final.rms_mm > 1.0

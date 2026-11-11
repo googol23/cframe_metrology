@@ -1,0 +1,2 @@
+# Frozen measurement arrays are retained locally, not added as repository binaries.
+*.npz

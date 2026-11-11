@@ -1,0 +1,141 @@
+# All relative paths are resolved from this configuration file. Lengths are mm.
+io:
+  output_dir: ../../../output/U3DL
+  output_precision: 6
+  comment_prefixes: ["#", "//", "$"]
+  delimiter: whitespace
+
+visualization:
+  dpi: 600
+  sample_size: 500000
+  random_seed: 23
+  draw:
+    cframe: false
+    sensors: false
+    full_ladders: false
+    all_ladders_and_cframe: false
+
+# Laser-tracker survey inputs, including the common point-cloud uncertainty.
+half_unit:
+  name: U3DL
+  assembly_naming: STS8
+  uncertainty:
+    mode: constant
+    sigma_xyz_mm: [0.050, 0.050, 0.050]
+  cframe:
+    file: data/cframe_facet.txt
+    normal: "-z"
+    facet_offset: 7.5 # Target facet Z; half the C-frame thickness.
+    fiducials:
+      file: data/cframe_fiducials.xyz
+      fiducial_min_distance: 5.0
+      draw: true
+      marker: "+"
+    plane_fit:
+      ransac_iterations: 600
+      ransac_threshold_mm: 0.05
+      random_seed: 23
+    references:
+      - file: data/hole_1.xyz
+        nominal_center: [267.75, +335.5]
+      - file: data/hole_2.xyz
+        nominal_center: [267.75, -335.5]
+    reference_points:
+      derivative_step_rad: 1.0e-7
+  # The L0/L1/L2 filenames are scanner aliases, not assembly module identities.
+  ladders:
+    L3DL100112:
+      segmentation:
+        mode: segmented_files
+      sensors:
+        - { name: L0T0, file: data/L0T0.txt }
+        - { name: L0T1, file: data/L0T1.txt }
+        - { name: L0T2, file: data/L0T2.txt }
+        - { name: L0T3, file: data/L0T3.txt }
+        - { name: L0T4, file: data/L0T4.txt }
+        - { name: L0B0, file: data/L0B0.txt }
+        - { name: L0B1, file: data/L0B1.txt }
+        - { name: L0B2, file: data/L0B2.txt }
+        - { name: L0B3, file: data/L0B3.txt }
+        - { name: L0B4, file: data/L0B4.txt }
+    L3DL300112:
+      segmentation:
+        mode: segmented_files
+      sensors:
+        - { name: L1T0, file: data/L1T0.txt }
+        - { name: L1T1, file: data/L1T1.txt }
+        - { name: L1T2, file: data/L1T2.txt }
+        - { name: L1T3, file: data/L1T3.txt }
+        - { name: L1T4, file: data/L1T4.txt }
+        - { name: L1B0, file: data/L1B0.txt }
+        - { name: L1B1, file: data/L1B1.txt }
+        - { name: L1B2, file: data/L1B2.txt }
+        - { name: L1B3, file: data/L1B3.txt }
+        - { name: L1B4, file: data/L1B4.txt }
+    L3DL500114:
+      segmentation:
+        mode: segmented_files
+      sensors:
+        - { name: L2T0, file: data/L2T0.txt }
+        - { name: L2T1, file: data/L2T1.txt }
+        - { name: L2T2, file: data/L2T2.txt }
+        - { name: L2B0, file: data/L2B0.txt }
+        - { name: L2B1, file: data/L2B1.txt }
+        - { name: L2B2, file: data/L2B2.txt }
+
+# External producers retain their own contracts and output paths.
+
+ladder_metrology:
+  enabled: true
+  source_dir: /u/dlmeas/STS
+  result_file: ../../../output/U3DL/ladder_metrology/sensor_transforms.json
+  sensor_frame: nominal_sensor_local_v1
+  mode: run
+  execution:
+    python: /u/dramirez/micromamba/envs/cbm/bin/python
+    working_dir: ../../..
+    timeout_seconds: 120
+  ladders: {}
+
+root_geometry:
+  enabled: true
+  source_file: /u/dramirez/cbm/cbmroot_geometry/macro/sts/fair/sts_v26a.geo.root
+  node: Unit04L_10
+  frame: node
+  output_dir: ../../../output/U3DL/root_geo
+  mode: run
+  execution:
+    python: /u/dramirez/WORK/sts_tools/PointCloudMetrology/.venv/bin/python
+    working_dir: ../../../sts_geo_utils
+    root: /cvmfs/fairsoft.gsi.de/debian12/fairsoft/jan24p5/bin/root
+    timeout_seconds: 120
+
+# Fit controls are independent of ladder analysis. Preview uses these geometry
+# inputs even when the fit is disabled; identity assumes matching physical frames.
+# Fits always use segmented clouds and their optically corrected sensor facets.
+registration:
+  enabled: true
+
+  measurement_frame: /sts_v26a/Unit04L_10
+  uncertainty_sigma: 3.0 # 0.050 mm isotropic sigma -> 0.150 mm per axis.
+  containment_tolerance_mm: 1e-1
+  max_translation_mm: 5.0
+  max_rotation_deg: 5.0
+  max_iterations: 300
+  draw: true
+  ladders:
+    L3DL100112:
+      geometry_file: ../../../output/U3DL/root_geo/Ladder_LadderType12_401.json
+      optical_sensor_map: { mode: y_order, sensor_to_geometry: ladder_aligned_box_center }
+    L3DL300112:
+      geometry_file: ../../../output/U3DL/root_geo/Ladder_LadderType12_403.json
+      optical_sensor_map: { mode: y_order, sensor_to_geometry: ladder_aligned_box_center }
+    L3DL500114:
+      geometry_file: ../../../output/U3DL/root_geo/Ladder_LadderType14_405.json
+      optical_sensor_map: { mode: y_order, sensor_to_geometry: ladder_aligned_box_center }
+
+ladder_analysis:
+  enabled: true
+  analyze_individual_sensors: true
+  visualization:
+    individual_plot_workers: 4

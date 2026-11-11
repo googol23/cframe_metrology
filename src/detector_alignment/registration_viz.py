@@ -12,7 +12,8 @@ from matplotlib.patches import Patch
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial import ConvexHull
 
-from .ladder_registration import LadderRegistrationResult, RegistrationEvaluation
+from .ladder_registration import RegistrationEvaluation
+from .labeled_registration import LabeledRegistrationResult
 from .nominal_geometry import NominalLadder, rigid_matrix
 
 
@@ -39,11 +40,16 @@ class RegistrationVisualizer:
         self,
         geometry: NominalLadder,
         points: np.ndarray,
-        result: LadderRegistrationResult,
+        result: LabeledRegistrationResult,
         path: str | Path,
         *,
         ladder_name: str,
+        covariances: np.ndarray | None = None,
+        facet_z_mm: float = 0.0,
     ) -> Path:
+        expanded = self._expanded_facets(
+            geometry, result, covariances, facet_z_mm
+        )
         status = (
             "accepted local fit"
             if result.accepted
@@ -65,7 +71,38 @@ class RegistrationVisualizer:
             pose_label="Fitted sensor volumes",
             residual_scale=1000.0,
             residual_unit="µm",
+            sensor_indices=result.final.sensor_indices,
+            expanded_corners=expanded,
         )
+
+    @staticmethod
+    def _expanded_facets(geometry, result, covariances, facet_z_mm):
+        """Plot-only outer envelope of the assigned-face containment bands.
+
+        Per-point uncertainty varies; max inlier padding per sensor makes this
+        a visual outer envelope, never an alternative acceptance test.
+        """
+        labels = result.final.sensor_indices
+        inliers = result.final.inlier_mask
+        expanded = []
+        for index, sensor in enumerate(geometry.sensors):
+            axes = result.rotation @ sensor.rotation
+            padding = np.zeros(3)
+            if covariances is not None:
+                selected = covariances[(labels == index) & inliers]
+                variance = np.einsum("ia,nij,ja->na", axes, selected, axes)
+                padding = result.options.uncertainty_sigma * np.sqrt(
+                    np.maximum(variance, 0).max(axis=0)
+                )
+            allowance = padding + result.options.containment_tolerance_mm
+            halfsize = sensor.dimensions_mm / 2
+            local = (sensor.corners_mm - sensor.center_mm) @ sensor.rotation
+            local[:, :2] *= (halfsize[:2] + allowance[:2]) / halfsize[:2]
+            outward = np.sign((sensor.center_mm[2] - facet_z_mm) * sensor.rotation[2, 2])
+            local[:, 2] = outward * halfsize[2] + np.sign(local[:, 2]) * allowance[2]
+            expanded.append(local @ axes.T + sensor.center_mm @ result.rotation.T
+                            + result.translation_mm)
+        return expanded
 
     def plot_initial(
         self,
@@ -117,6 +154,8 @@ class RegistrationVisualizer:
         residual_scale: float,
         residual_unit: str,
         original_geometry: NominalLadder | None = None,
+        sensor_indices: np.ndarray | None = None,
+        expanded_corners: list[np.ndarray] | None = None,
     ) -> Path:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,6 +169,17 @@ class RegistrationVisualizer:
         shown = points[indices]
         residual_values = np.abs(residuals_mm[indices]) * residual_scale
         color_limit = max(float(np.max(np.abs(residuals_mm))) * residual_scale, 1.0)
+        sensor_colors = None
+        point_colors = residual_values
+        if sensor_indices is not None:
+            labels = np.asarray(sensor_indices)
+            if (labels.shape != (len(points),)
+                    or not np.issubdtype(labels.dtype, np.integer)
+                    or np.any(labels < 0) or np.any(labels >= len(geometry.sensors))):
+                raise ValueError("Registration plot requires a valid sensor label per point")
+            palette = np.asarray(plt.get_cmap("tab20").colors)
+            sensor_colors = palette[np.arange(len(geometry.sensors)) % len(palette)]
+            point_colors = sensor_colors[labels[indices]]
         if original_geometry is not None:
             original_by_node = {s.node_path: s for s in original_geometry.sensors}
             if set(original_by_node) != {s.node_path for s in geometry.sensors}:
@@ -143,6 +193,7 @@ class RegistrationVisualizer:
             (
                 *nominal,
                 *fitted,
+                *(expanded_corners or []),
                 np.min(points, axis=0),
                 np.max(points, axis=0),
             )
@@ -171,27 +222,36 @@ class RegistrationVisualizer:
             for ax, dimensions, view_title in zip(
                 axes[:2], ((0, 1), (1, 2)), ("XY", "YZ")
             ):
-                for corners, moved in zip(nominal, fitted):
+                for sensor_index, (corners, moved) in enumerate(zip(nominal, fitted)):
+                    volume_color = ("tab:blue" if sensor_colors is None
+                                    else sensor_colors[sensor_index])
                     for box, is_nominal in ((corners, True), (moved, False)):
                         projection = box[:, dimensions]
                         polygon = projection[ConvexHull(projection).vertices]
                         ax.add_collection(
                             PolyCollection(
                                 [polygon],
-                                facecolors="none" if is_nominal else "tab:blue",
-                                edgecolors="0.4" if is_nominal else "tab:blue",
+                                facecolors="none" if is_nominal else volume_color,
+                                edgecolors=("0.4" if sensor_colors is None and is_nominal
+                                            else volume_color),
                                 alpha=0.65 if is_nominal else 0.22,
                                 linestyles="--" if is_nominal else "-",
                                 linewidths=0.8,
                             )
                         )
+                    if expanded_corners is not None:
+                        outline = expanded_corners[sensor_index][:, dimensions]
+                        polygon = outline[ConvexHull(outline).vertices]
+                        ax.add_collection(PolyCollection(
+                            [polygon], facecolors="none", edgecolors=volume_color,
+                            linestyles=":", linewidths=1.2,
+                        ))
                 ax.scatter(
                     shown[:, dimensions[0]],
                     shown[:, dimensions[1]],
-                    c=residual_values,
-                    cmap="magma",
-                    vmin=0,
-                    vmax=color_limit,
+                    c=point_colors,
+                    **({"cmap": "magma", "vmin": 0, "vmax": color_limit}
+                       if sensor_colors is None else {}),
                     s=3,
                     linewidths=0,
                     rasterized=True,
@@ -220,12 +280,14 @@ class RegistrationVisualizer:
                     )
                 ax.grid(alpha=0.2)
             ax3d = axes[2]
-            for corners, moved in zip(nominal, fitted):
+            for sensor_index, (corners, moved) in enumerate(zip(nominal, fitted)):
+                volume_color = ("tab:blue" if sensor_colors is None
+                                else sensor_colors[sensor_index])
                 ax3d.add_collection3d(
                     Poly3DCollection(
                         [moved[list(face)] for face in self._FACES],
-                        facecolors="tab:blue",
-                        edgecolors="tab:blue",
+                        facecolors=volume_color,
+                        edgecolors=volume_color,
                         alpha=0.18,
                         linewidths=0.4,
                     )
@@ -233,14 +295,23 @@ class RegistrationVisualizer:
                 for face in self._FACES:
                     line = corners[list(face) + [face[0]]]
                     ax3d.plot(
-                        *line.T, color="0.4", linestyle="--", linewidth=0.5, alpha=0.65
+                        *line.T,
+                        color="0.4" if sensor_colors is None else volume_color,
+                        linestyle="--", linewidth=0.5, alpha=0.65
                     )
+                if expanded_corners is not None:
+                    corners = expanded_corners[sensor_index]
+                    for vertex in range(8):
+                        for bit in (1, 2, 4):
+                            if not vertex & bit:
+                                ax3d.plot(*corners[[vertex, vertex | bit]].T,
+                                          color=volume_color, linestyle=":",
+                                          linewidth=0.8)
             scatter = ax3d.scatter(
                 *shown.T,
-                c=residual_values,
-                cmap="magma",
-                vmin=0,
-                vmax=color_limit,
+                c=point_colors,
+                **({"cmap": "magma", "vmin": 0, "vmax": color_limit}
+                   if sensor_colors is None else {}),
                 s=3,
                 linewidths=0,
                 rasterized=True,
@@ -273,33 +344,44 @@ class RegistrationVisualizer:
             ax3d.set_ylabel("Y [mm]")
             ax3d.set_zlabel("Z [mm]")
             ax3d.set_title("Perspective")
-            fig.colorbar(
-                scatter,
-                cax=colorbar_axis,
-                label=f"Distance to sensor surface [{residual_unit}]",
-            )
+            if sensor_colors is None:
+                fig.colorbar(
+                    scatter,
+                    cax=colorbar_axis,
+                    label=f"Distance to sensor surface [{residual_unit}]",
+                )
+            else:
+                colorbar_axis.axis("off")
             fig.suptitle(title)
             fig.legend(
                 handles=[
                     Line2D(
                         [],
                         [],
-                        color="0.4",
+                        color="0.4" if sensor_colors is None else sensor_colors[0],
                         linestyle="--",
-                        label=(
-                            "Original ROOT geometry"
-                            if original_geometry is not None
-                            else "Nominal geometry"
-                        ),
+                        label=("Corrected nominal sensor outlines"
+                               if sensor_colors is not None else
+                               "Original ROOT geometry" if original_geometry is not None
+                               else "Nominal geometry"),
                     ),
-                    Patch(facecolor="tab:blue", alpha=0.22, label=pose_label),
+                    *([Line2D(
+                        [], [], color=sensor_colors[0], linestyle=":",
+                        label="Expanded assigned facet (max inlier uncertainty; visual only)",
+                    )] if expanded_corners is not None else []),
+                    Patch(
+                        facecolor="tab:blue" if sensor_colors is None else sensor_colors[0],
+                        alpha=0.22,
+                        label=pose_label,
+                    ),
                     Line2D(
                         [],
                         [],
                         marker=".",
                         linestyle="none",
-                        color="black",
-                        label="Measured surface points",
+                        color="black" if sensor_colors is None else sensor_colors[0],
+                        label=("Measured surface points" if sensor_colors is None
+                               else "Points coloured by assigned sensor"),
                     ),
                 ],
                 loc="lower center",

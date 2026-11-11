@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from detector_alignment.ladder_registration import LadderRegistrar, RegistrationOptions
+from detector_alignment.ladder_registration import RegistrationOptions, SensorBoxEvaluator
+from detector_alignment.labeled_registration import LabeledFaceRegistrar
 from detector_alignment.nominal_geometry import NominalLadder, NominalSensor
 from detector_alignment.registration_viz import RegistrationVisualizer
 
@@ -102,12 +103,12 @@ def test_rigid_recovery_with_observable_surfaces():
         box(center=(-25, 0, 0), name="/ladder/a"),
         box(
             center=(25, 0, 0),
-            rotation=Rotation.from_euler("y", 55, degrees=True).as_matrix(),
+            rotation=Rotation.from_euler("y", 5, degrees=True).as_matrix(),
             name="/ladder/b",
         ),
         box(
             center=(0, 40, 0),
-            rotation=Rotation.from_euler("x", 65, degrees=True).as_matrix(),
+            rotation=Rotation.from_euler("x", 4, degrees=True).as_matrix(),
             name="/ladder/c",
         ),
     )
@@ -118,7 +119,8 @@ def test_rigid_recovery_with_observable_surfaces():
         np.concatenate([surface_points(sensor) for sensor in sensors]) @ rotation.T
         + translation
     )
-    result = LadderRegistrar().fit(geometry, points)
+    result = LabeledFaceRegistrar(facet_z_mm=-10).fit(
+        geometry, points, np.repeat(np.arange(len(sensors)), 25))
     assert result.accepted, result.optimizer_message
     np.testing.assert_allclose(result.rotation, rotation, atol=2e-6)
     np.testing.assert_allclose(result.translation_mm, translation, atol=2e-5)
@@ -136,7 +138,8 @@ def test_partial_plane_reports_unobservable_directions():
     sensor = box()
     geometry = NominalLadder("/ladder", "global", (sensor,))
     points = surface_points(sensor) + [0, 0, 0.5]
-    result = LadderRegistrar().fit(geometry, points)
+    result = LabeledFaceRegistrar(facet_z_mm=-10).fit(
+        geometry, points, np.zeros(len(points), dtype=int))
     assert result.accepted
     assert result.final.rms_mm < 1e-7
     assert result.surface_jacobian_rank == 3
@@ -148,7 +151,7 @@ def test_partial_plane_reports_unobservable_directions():
 def test_surface_distance_not_volume_distance():
     sensor = box(dimensions=(20, 30, 2))
     geometry = NominalLadder("/ladder", "global", (sensor,))
-    evaluation = LadderRegistrar().evaluate(
+    evaluation = SensorBoxEvaluator().evaluate(
         geometry, np.zeros((3, 3)), np.eye(3), np.zeros(3)
     )
     np.testing.assert_allclose(evaluation.residuals_mm, -1)
@@ -162,7 +165,7 @@ def test_containment_uses_oriented_boxes_and_projected_anisotropic_covariance():
     points = np.array([[1.2, 0, 0], [0, 2.2, 0], [0, 0, 0.4]]) @ axes.T
     local_covariance = np.diag([0.1**2, 0.02**2, 0.03**2])
     covariance = np.repeat((axes @ local_covariance @ axes.T)[None], 3, axis=0)
-    registrar = LadderRegistrar(RegistrationOptions(uncertainty_sigma=3))
+    registrar = SensorBoxEvaluator(RegistrationOptions(uncertainty_sigma=3))
     evaluation = registrar.evaluate(
         geometry, points, np.eye(3), np.zeros(3), covariance
     )
@@ -189,7 +192,7 @@ def test_covariance_is_projected_after_ladder_rotation():
     rotation = Rotation.from_euler("y", 90, degrees=True).as_matrix()
     points = np.repeat(np.array([[0, 0, 0.4]]) @ rotation.T, 3, axis=0)
     covariance = np.repeat(np.diag([0.1**2, 0.001**2, 0.001**2])[None], 3, axis=0)
-    evaluation = LadderRegistrar().evaluate(
+    evaluation = SensorBoxEvaluator().evaluate(
         geometry, points, rotation, np.zeros(3), covariance
     )
     np.testing.assert_allclose(evaluation.containment_margin_mm, 0.05, atol=1e-10)
@@ -197,13 +200,13 @@ def test_covariance_is_projected_after_ladder_rotation():
 
 def test_infeasible_point_is_not_discarded_or_reported_as_success():
     geometry = NominalLadder("/ladder", "global", (box(),))
-    points = np.vstack((surface_points(geometry.sensors[0]), [100, 100, 100]))
-    registrar = LadderRegistrar(
+    points = np.vstack((surface_points(geometry.sensors[0]), [100, 100, 0.15]))
+    registrar = LabeledFaceRegistrar(
         RegistrationOptions(
             max_translation_mm=0.1, max_rotation_deg=0.1, max_iterations=30
-        )
+        ), facet_z_mm=-10
     )
-    result = registrar.fit(geometry, points)
+    result = registrar.fit(geometry, points, np.zeros(len(points), dtype=int))
     assert not result.accepted
     assert not result.feasible
     assert len(result.final.residuals_mm) == len(points)
@@ -217,12 +220,12 @@ def test_initial_transform_and_pivot_convention():
         box(
             center=(160, -200, 50),
             name="/ladder/b",
-            rotation=Rotation.from_euler("y", 55, degrees=True).as_matrix(),
+            rotation=Rotation.from_euler("y", 5, degrees=True).as_matrix(),
         ),
         box(
             center=(120, -160, 50),
             name="/ladder/c",
-            rotation=Rotation.from_euler("x", 65, degrees=True).as_matrix(),
+            rotation=Rotation.from_euler("x", 4, degrees=True).as_matrix(),
         ),
     )
     geometry = NominalLadder("/ladder", "global", sensors)
@@ -231,7 +234,8 @@ def test_initial_transform_and_pivot_convention():
     initial[:3, 3] = [40, -20, 80]
     points = np.concatenate([surface_points(sensor) for sensor in sensors])
     points = points @ initial[:3, :3].T + initial[:3, 3] + [0, 0, 0.2]
-    result = LadderRegistrar().fit(geometry, points, initial_transform=initial)
+    result = LabeledFaceRegistrar().fit(
+        geometry, points, np.repeat(np.arange(3), 25), initial_transform=initial)
     assert result.accepted
     np.testing.assert_allclose(result.translation_mm, [40, -20, 80.2], atol=1e-6)
     np.testing.assert_allclose(
@@ -254,7 +258,7 @@ def test_initial_transform_and_pivot_convention():
 def test_registration_validates_covariances(covariance, match):
     geometry = NominalLadder("/ladder", "global", (box(),))
     with pytest.raises(ValueError, match=match):
-        LadderRegistrar().fit(geometry, np.zeros((3, 3)), covariance)
+        LabeledFaceRegistrar().fit(geometry, np.zeros((3, 3)), np.zeros(3, dtype=int), covariance)
 
 
 @pytest.mark.parametrize(
@@ -278,7 +282,8 @@ def test_three_view_plot(tmp_path, monkeypatch):
     sensor = box()
     geometry = NominalLadder("/ladder", "global", (sensor,))
     points = surface_points(sensor) + [0, 0, 0.2]
-    result = LadderRegistrar().fit(geometry, points)
+    result = LabeledFaceRegistrar(facet_z_mm=-10).fit(
+        geometry, points, np.zeros(len(points), dtype=int))
     captured = []
     original_savefig = matplotlib.figure.Figure.savefig
 
@@ -294,8 +299,96 @@ def test_three_view_plot(tmp_path, monkeypatch):
     monkeypatch.setattr(matplotlib.figure.Figure, "savefig", inspect_figure)
     path = tmp_path / "registration.png"
     RegistrationVisualizer(dpi=50, sample_size=5).plot(
-        geometry, points, result, path, ladder_name="L1"
+        geometry, points, result, path, ladder_name="L1", facet_z_mm=-10
     )
     assert path.stat().st_size > 1000
     assert captured[0][0] == ["XY", "YZ", "Perspective"]
     assert any(alpha is not None and 0 < alpha < 1 for alpha in captured[0][1])
+
+
+def test_registration_plot_matches_sampled_points_to_corrected_sensor_colors(
+    tmp_path, monkeypatch
+):
+    import matplotlib.figure
+
+    sensors = tuple(box(center=(0, y, 2), name=f"/ladder/s{i}")
+                    for i, y in enumerate((-40, 40)))
+    geometry = NominalLadder("/ladder", "global", sensors)
+    points = np.vstack([surface_points(sensor) for sensor in sensors])
+    labels = np.repeat(np.arange(2), 25)
+    result = LabeledFaceRegistrar().fit(geometry, points, labels)
+    seen = []
+    original_savefig = matplotlib.figure.Figure.savefig
+
+    def inspect_figure(figure, *args, **kwargs):
+        figure.canvas.draw()
+        selected = np.sort(np.random.default_rng(42).choice(len(points), 7, replace=False))
+        for axis in figure.axes[:2]:
+            collections = axis.collections
+            point_colors = collections[-1].get_facecolors()[:, :3]
+            expected = np.vstack([
+                collections[3 * index + 1].get_facecolors()[0, :3]
+                for index in labels[selected]
+            ])
+            np.testing.assert_allclose(point_colors, expected)
+            for i in range(2):
+                np.testing.assert_allclose(
+                    collections[3 * i].get_edgecolors()[0, :3],
+                    collections[3 * i + 1].get_facecolors()[0, :3],
+                )
+                np.testing.assert_allclose(
+                    collections[3 * i + 2].get_edgecolors()[0, :3],
+                    collections[3 * i + 1].get_facecolors()[0, :3],
+                )
+                assert collections[3 * i + 2].get_linestyles()[0][1] is not None
+            assert not np.allclose(expected[0], expected[-1])
+        for i in range(2):
+            np.testing.assert_allclose(
+                figure.axes[2].collections[i].get_facecolor()[0, :3],
+                figure.axes[0].collections[3 * i + 1].get_facecolors()[0, :3],
+            )
+        assert all(line.get_linestyle() == ':' for line in figure.axes[2].lines[6:18])
+        assert not figure.axes[3].axison  # No residual colourbar on sensor-coloured fits.
+        seen.append(True)
+        return original_savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(matplotlib.figure.Figure, "savefig", inspect_figure)
+    path = tmp_path / "sensor_colors.png"
+    RegistrationVisualizer(dpi=50, sample_size=7).plot(
+        geometry, points, result, path, ladder_name="L1")
+    assert seen and path.stat().st_size > 1000
+
+
+def test_expanded_facet_envelope_uses_inliers_uncertainty_and_face_not_full_box():
+    from detector_alignment.registration_viz import RegistrationVisualizer
+
+    rotation = Rotation.from_euler("z", 30, degrees=True).as_matrix()
+    sensors = (box(center=(0, 20, 2), dimensions=(20, 10, 0.3),
+                   rotation=rotation),)
+    geometry = NominalLadder("/ladder", "global", sensors)
+    points = surface_points(sensors[0])
+    points = np.vstack((points, points[0] + [0, 0, 4]))
+    covariances = np.repeat(np.diag([0.02**2, 0.04**2, 0.03**2])[None],
+                            len(points), axis=0)
+    covariances[0] = np.diag([0.05**2, 0.06**2, 0.07**2])
+    covariances[-1] = np.eye(3) * 10**2  # Must not expand the inlier envelope.
+    result = LabeledFaceRegistrar().fit(
+        geometry, points, np.zeros(len(points), dtype=int), covariances)
+    assert not result.final.inlier_mask[-1]
+    corners = RegistrationVisualizer._expanded_facets(
+        geometry, result, covariances, facet_z_mm=0)[0]
+    local = (corners - (result.rotation @ sensors[0].center_mm + result.translation_mm)) @ (
+        result.rotation @ sensors[0].rotation)
+    axes = result.rotation @ sensors[0].rotation
+    projected = np.einsum("ia,nij,ja->na", axes, covariances[:-1], axes)
+    allowance = result.options.uncertainty_sigma * np.sqrt(projected.max(axis=0))
+    allowance += result.options.containment_tolerance_mm
+    np.testing.assert_allclose(np.max(np.abs(local[:, :2]), axis=0),
+                               sensors[0].dimensions_mm[:2] / 2 + allowance[:2])
+    np.testing.assert_allclose(np.sort(np.unique(np.round(local[:, 2], 10))),
+                               sensors[0].dimensions_mm[2] / 2 +
+                               np.array([-allowance[2], allowance[2]]), atol=1e-9)
+    plain = RegistrationVisualizer._expanded_facets(geometry, result, None, 0)[0]
+    plain_local = (plain - (result.rotation @ sensors[0].center_mm + result.translation_mm)) @ axes
+    np.testing.assert_allclose(np.ptp(plain_local[:, 2]),
+                               2 * result.options.containment_tolerance_mm, atol=1e-10)

@@ -58,16 +58,20 @@ half_unit:
         - { name: L1T0, file: data/L1T0.txt }
         - { name: L1T1, file: data/L1T1.txt }
 
-# Optional nominal registration. When enabled, each participating ladder needs
-# a geometry_file and an exact measurement_frame matching its ROOT export.
+# Optional registration has no mode selector. Enable/configure ladder_metrology
+# first. Each participating ladder requires segmented_files (one cloud per ROOT
+# sensor), a complete optical_sensor_map, a geometry_file and an exact
+# measurement_frame matching its ROOT export. Automatic clouds remain available
+# for sensor analysis/preview only, not registration.
 # registration:
 #   enabled: true
 #   measurement_frame: global
 #   uncertainty_sigma: 3.0 # Multiplier of point-cloud sigma, not a second sigma.
 #   draw: true
 #   ladders:
-#     L3DL0:
-#       geometry_file: data/L3DL0_geometry.json
+#     L3DL1:
+#       geometry_file: data/L3DL1_geometry.json
+#       optical_sensor_map: {mode: y_order, sensor_to_geometry: ladder_aligned_box_center}
 #       max_translation_mm: 2.0
 
 ladder_analysis:

@@ -1,0 +1,1347 @@
+{
+  "scope": "Current cached C-frame alignment and validated cached optical/ROOT geometry; not a reconstruction of the historical logged run",
+  "configuration_adjustment": {
+    "original_tolerance": "1e-1",
+    "original_type": "str",
+    "numeric_tolerance_mm": 0.1
+  },
+  "alignment": {
+    "file": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/../../../output/U3DL/matrices/transform_matrix.npy",
+    "sha256": "1a9c366524b043984ef91cd3f64b663f09dd2d1c950837421ba00b80790c1e5e",
+    "matrix": [
+      [
+        0.28561894532496734,
+        0.9582150083119504,
+        0.01567851769721226,
+        377.9687316674879
+      ],
+      [
+        0.013185654079129682,
+        -0.020287722431107404,
+        0.9997072305655608,
+        101.74580096699596
+      ],
+      [
+        0.9582525536610682,
+        -0.28532859331705057,
+        -0.01842924951685032,
+        2716.046238507547
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "numpy_version": "2.4.6",
+  "scipy_version": "1.17.1",
+  "ladders": {
+    "L3DL100112": {
+      "snapshot": "L3DL100112.npz",
+      "sha256": "e6cb948c05ea648324cee46b922c22da0d6abd9d3860087f728563b60333df8a",
+      "config": {
+        "enabled": true,
+        "measurement_frame": "/sts_v26a/Unit04L_10",
+        "uncertainty_sigma": 3.0,
+        "containment_tolerance_mm": 0.1,
+        "max_translation_mm": 5.0,
+        "max_rotation_deg": 5.0,
+        "max_iterations": 300,
+        "draw": true,
+        "geometry_file": "../../../output/U3DL/root_geo/Ladder_LadderType12_401.json",
+        "optical_sensor_map": {
+          "mode": "y_order",
+          "sensor_to_geometry": "ladder_aligned_box_center"
+        }
+      },
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401",
+      "frame": "/sts_v26a/Unit04L_10",
+      "sensor_nodes": [
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_0/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_1/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_2/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module02_3/Sensor03_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module03_4/Sensor04_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_0/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_1/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_2/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module02_3/Sensor03_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module03_4/Sensor04_0"
+      ],
+      "provenance": {
+        "root_geometry": {
+          "managed": true,
+          "manifest_file": "/u/dramirez/WORK/sts_tools/output/U3DL/root_geo/manifest.json",
+          "source_geometry": {
+            "path": "/u/dramirez/cbm/cbmroot_geometry/macro/sts/fair/sts_v26a.geo.root",
+            "sha256": "05862e4e0d17028487d8b2613f94b6169bcdd2fccc64b99fc619b2462e645c73"
+          },
+          "node_selector": "Unit04L_10",
+          "node_path": "/sts_v26a/Unit04L_10",
+          "measurement_frame": "/sts_v26a/Unit04L_10",
+          "input_fingerprint": "6896f098fe0aa35e88feb231d095520a0a1ef1723272f1076d3795dcf301661f",
+          "result_digest": "cd243128fefb7fd9430821ee4cb5f80f4955597d9bc9472cb31d89d1e06e6f5a",
+          "geometry_file": {
+            "path": "/u/dramirez/WORK/sts_tools/output/U3DL/root_geo/Ladder_LadderType12_401.json",
+            "relative_path": "Ladder_LadderType12_401.json",
+            "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401",
+            "sensor_count": 10,
+            "sha256": "da2a2d5a504c39c770822f4e801e3eb30a8bd389a448a5cf1e84cff3a9122364"
+          }
+        },
+        "optical_metrology": {
+          "applied": true,
+          "assembly_ladder": "L3DL100112",
+          "input_fingerprint": "537755f539b094e771703e04da3853b857f5211fe211bffbc33b351d09d615ea",
+          "result_digest": "1731c07cbcf8e9fdbe2afc21f65c7478a0e4651dec409f1978d2653506cb3133",
+          "result_file": "/u/dramirez/WORK/sts_tools/output/U3DL/ladder_metrology/sensor_transforms.json",
+          "sensor_frame": "nominal_sensor_local_v1",
+          "sensor_mapping": {
+            "M3DL1B4001124B2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module03_4/Sensor04_0",
+              "sensor_to_geometry": [
+                [
+                  -1.0,
+                  -1.2246467991473532e-16,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.2246467991473532e-16,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL1B3001123B2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module02_3/Sensor03_0",
+              "sensor_to_geometry": [
+                [
+                  -1.0,
+                  -1.2246467991473532e-16,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.2246467991473532e-16,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL1B2001122B2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_2/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  -1.0,
+                  -1.2246467991473532e-16,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.2246467991473532e-16,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL1B1001121B2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_1/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  -1.0,
+                  -1.2246467991473532e-16,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.2246467991473532e-16,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL1B0001120B2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_0/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  -1.0,
+                  -1.2246467991473532e-16,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.2246467991473532e-16,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL1T0001120A2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_0/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL1T1001121A2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_1/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL1T2001122A2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_2/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL1T3001123A2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module02_3/Sensor03_0",
+              "sensor_to_geometry": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL1T4001124A2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module03_4/Sensor04_0",
+              "sensor_to_geometry": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          },
+          "uncertainty_scope": "optical corrections treated as fixed geometry; optical covariance is not propagated into registration",
+          "corrected_sensors": [
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_0/Sensor02_0",
+              "center_mm": [
+                89.28491569323761,
+                18.745309598109856,
+                44.46538072957513
+              ],
+              "rotation": [
+                [
+                  0.9999999137063089,
+                  0.0003520328363682284,
+                  0.000220590699368329
+                ],
+                [
+                  -0.0003515475083929226,
+                  0.9999975262961137,
+                  -0.0021963187388671346
+                ],
+                [
+                  -0.0002213633300074708,
+                  0.002196241001227947,
+                  0.9999975637589026
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_1/Sensor02_0",
+              "center_mm": [
+                89.31062789158726,
+                56.160296559433824,
+                46.0316316178572
+              ],
+              "rotation": [
+                [
+                  0.9999999398220355,
+                  0.00011032245225560428,
+                  0.00032891470283857947
+                ],
+                [
+                  -0.00011064884609460352,
+                  0.9999995013672213,
+                  0.000992482816823332
+                ],
+                [
+                  -0.0003288050456927538,
+                  -0.000992519151130069,
+                  0.9999994533963389
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_2/Sensor02_0",
+              "center_mm": [
+                89.30284659246162,
+                93.54090930887757,
+                47.53181375979191
+              ],
+              "rotation": [
+                [
+                  0.9999999728156503,
+                  0.00020095542921563908,
+                  0.00011826078900574618
+                ],
+                [
+                  -0.0002007482996287576,
+                  0.9999984505619676,
+                  -0.0017488778643154224
+                ],
+                [
+                  -0.00011861205226985119,
+                  0.0017488540761210094,
+                  0.9999984637191207
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module02_3/Sensor03_0",
+              "center_mm": [
+                89.2714402428899,
+                140.85857330923812,
+                49.02867444877986
+              ],
+              "rotation": [
+                [
+                  0.9999999653853606,
+                  0.00025318967366345484,
+                  -7.158398379935185e-05
+                ],
+                [
+                  -0.00025320180112843165,
+                  0.9999999535864795,
+                  -0.0001694576254083972
+                ],
+                [
+                  7.15410755560102e-05,
+                  0.00016947574473631256,
+                  0.9999999830799231
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module03_4/Sensor04_0",
+              "center_mm": [
+                89.2575694516842,
+                229.3043906505543,
+                50.529603989539794
+              ],
+              "rotation": [
+                [
+                  0.9999999890533395,
+                  6.543410832532959e-05,
+                  0.000132709073896117
+                ],
+                [
+                  -6.54465947810221e-05,
+                  0.9999999934322108,
+                  9.40867769000938e-05
+                ],
+                [
+                  -0.0001327029165401601,
+                  -9.409546122714083e-05,
+                  0.99999998676799
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_0/Sensor02_0",
+              "center_mm": [
+                89.28046,
+                -18.693050000000003,
+                42.903439999999975
+              ],
+              "rotation": [
+                [
+                  -0.9999999377575971,
+                  0.00022272076736392103,
+                  -0.00027364258005091924
+                ],
+                [
+                  -0.00022278698234662434,
+                  -0.9999999459083548,
+                  0.00024196951814508798
+                ],
+                [
+                  -0.00027358867361238203,
+                  0.00024203046708897482,
+                  0.9999999332852431
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_1/Sensor02_0",
+              "center_mm": [
+                89.27926455003931,
+                -56.15387172953509,
+                44.49630626031692
+              ],
+              "rotation": [
+                [
+                  -0.9999999321344156,
+                  -0.00036649033246718976,
+                  -3.762978353546777e-05
+                ],
+                [
+                  0.00036651190643515255,
+                  -0.9999997675654713,
+                  -0.0005749243655729116
+                ],
+                [
+                  -3.741907056712446e-05,
+                  -0.0005749381183190358,
+                  0.999999834022973
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_2/Sensor02_0",
+              "center_mm": [
+                89.30010901855297,
+                -93.50426893927282,
+                45.97984967747192
+              ],
+              "rotation": [
+                [
+                  -0.9999999225975139,
+                  0.0003317418192727967,
+                  0.0002115474690626044
+                ],
+                [
+                  -0.00033151342315276594,
+                  -0.9999993631796358,
+                  0.0010787674324772036
+                ],
+                [
+                  0.0002119052066154903,
+                  0.0010786972181522942,
+                  0.999999395754065
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module02_3/Sensor03_0",
+              "center_mm": [
+                89.31872362240165,
+                -140.89673559503083,
+                47.47586823173425
+              ],
+              "rotation": [
+                [
+                  -0.9999999638256633,
+                  -0.00020293924669902947,
+                  -0.00017653422984213746
+                ],
+                [
+                  0.00020284790574864867,
+                  -0.9999998456389981,
+                  0.0005172762384126942
+                ],
+                [
+                  -0.00017663917824229568,
+                  0.0005172404101017529,
+                  0.9999998506304683
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module03_4/Sensor04_0",
+              "center_mm": [
+                89.3329789306885,
+                -229.3439727886686,
+                49.00730026043512
+              ],
+              "rotation": [
+                [
+                  -0.9999999629301699,
+                  1.3270728059380328e-05,
+                  0.00027196239878337795
+                ],
+                [
+                  -1.3087437590992337e-05,
+                  -0.9999997728128079,
+                  0.0006739458815541148
+                ],
+                [
+                  0.0002719712807495251,
+                  0.0006739422972801343,
+                  0.9999997359166662
+                ]
+              ]
+            }
+          ]
+        }
+      },
+      "inputs": [
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L0T0.txt",
+          "sha256": "1aa96384fc1f3e2119b056fc6bc0e1e22356cb5de6f109a7c75cf071649bdf04"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L0T1.txt",
+          "sha256": "8c45553fb5411acd30240edb21a37d2b7bf9f76fc9e90ed12ef666087e75b780"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L0T2.txt",
+          "sha256": "fce8ffbdab4d52d3f8ca4e7369fa99b56fa2c3eca764dccbacc7216e828fd167"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L0T3.txt",
+          "sha256": "9b441865fe46f38dae082284bc185ad8eb36b14f9a7fd6d60fb662b3277f07af"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L0T4.txt",
+          "sha256": "133ffe41a41d80d07c8fcebcc282fef8451e027928d12434d76c023402040087"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L0B0.txt",
+          "sha256": "2313aad53e2471d0d39a66214ef0c09e7198d929c292982f07a8c937acef67ae"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L0B1.txt",
+          "sha256": "6dce84284255dfe9560ea94bb56716cb3c0e2f4bf316bbd4df1e5967747d7d71"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L0B2.txt",
+          "sha256": "3edbf36a4cd25ffca7fc5f2a7231d81c5cb427d67548804c44b51e93d433d6c9"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L0B3.txt",
+          "sha256": "139d39572404e84b139af4e86de7e0c0a97746ac9e2835dd401bb18e9009c20b"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L0B4.txt",
+          "sha256": "8ff502037f76067fd99cfdfef9b661061ae91ce949fa5f786deded57de27aa40"
+        }
+      ]
+    },
+    "L3DL300112": {
+      "snapshot": "L3DL300112.npz",
+      "sha256": "efce64c61f6fb3efeea288bbf94a053f5e25ed7235cbcd2bbe136fbaad360e91",
+      "config": {
+        "enabled": true,
+        "measurement_frame": "/sts_v26a/Unit04L_10",
+        "uncertainty_sigma": 3.0,
+        "containment_tolerance_mm": 0.1,
+        "max_translation_mm": 5.0,
+        "max_rotation_deg": 5.0,
+        "max_iterations": 300,
+        "draw": true,
+        "geometry_file": "../../../output/U3DL/root_geo/Ladder_LadderType12_403.json",
+        "optical_sensor_map": {
+          "mode": "y_order",
+          "sensor_to_geometry": "ladder_aligned_box_center"
+        }
+      },
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403",
+      "frame": "/sts_v26a/Unit04L_10",
+      "sensor_nodes": [
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module01_0/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module01_1/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module01_2/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module02_3/Sensor03_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module03_4/Sensor04_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module01_0/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module01_1/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module01_2/Sensor02_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module02_3/Sensor03_0",
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module03_4/Sensor04_0"
+      ],
+      "provenance": {
+        "root_geometry": {
+          "managed": true,
+          "manifest_file": "/u/dramirez/WORK/sts_tools/output/U3DL/root_geo/manifest.json",
+          "source_geometry": {
+            "path": "/u/dramirez/cbm/cbmroot_geometry/macro/sts/fair/sts_v26a.geo.root",
+            "sha256": "05862e4e0d17028487d8b2613f94b6169bcdd2fccc64b99fc619b2462e645c73"
+          },
+          "node_selector": "Unit04L_10",
+          "node_path": "/sts_v26a/Unit04L_10",
+          "measurement_frame": "/sts_v26a/Unit04L_10",
+          "input_fingerprint": "6896f098fe0aa35e88feb231d095520a0a1ef1723272f1076d3795dcf301661f",
+          "result_digest": "cd243128fefb7fd9430821ee4cb5f80f4955597d9bc9472cb31d89d1e06e6f5a",
+          "geometry_file": {
+            "path": "/u/dramirez/WORK/sts_tools/output/U3DL/root_geo/Ladder_LadderType12_403.json",
+            "relative_path": "Ladder_LadderType12_403.json",
+            "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403",
+            "sensor_count": 10,
+            "sha256": "f1c2e1c3a044735da3c0325697cd7438309d515d61059db7e72cdabdcaa5192c"
+          }
+        },
+        "optical_metrology": {
+          "applied": true,
+          "assembly_ladder": "L3DL300112",
+          "input_fingerprint": "537755f539b094e771703e04da3853b857f5211fe211bffbc33b351d09d615ea",
+          "result_digest": "1731c07cbcf8e9fdbe2afc21f65c7478a0e4651dec409f1978d2653506cb3133",
+          "result_file": "/u/dramirez/WORK/sts_tools/output/U3DL/ladder_metrology/sensor_transforms.json",
+          "sensor_frame": "nominal_sensor_local_v1",
+          "sensor_mapping": {
+            "M3DL3B4001124B2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module03_4/Sensor04_0",
+              "sensor_to_geometry": [
+                [
+                  -1.0,
+                  -1.2246467991473532e-16,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.2246467991473532e-16,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL3B3001123B2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module02_3/Sensor03_0",
+              "sensor_to_geometry": [
+                [
+                  -1.0,
+                  -1.2246467991473532e-16,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.2246467991473532e-16,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL3B2001122B2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module01_2/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  -1.0,
+                  -1.2246467991473532e-16,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.2246467991473532e-16,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL3B1001121B2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module01_1/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  -1.0,
+                  -1.2246467991473532e-16,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.2246467991473532e-16,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL3B0001120B2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module01_0/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  -1.0,
+                  -1.2246467991473532e-16,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.2246467991473532e-16,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL3T0001120A2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module01_0/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL3T1001121A2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module01_1/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL3T2001122A2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module01_2/Sensor02_0",
+              "sensor_to_geometry": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL3T3001123A2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module02_3/Sensor03_0",
+              "sensor_to_geometry": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "M3DL3T4101124A2": {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module03_4/Sensor04_0",
+              "sensor_to_geometry": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          },
+          "uncertainty_scope": "optical corrections treated as fixed geometry; optical covariance is not propagated into registration",
+          "corrected_sensors": [
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module01_0/Sensor02_0",
+              "center_mm": [
+                208.30099814658988,
+                18.79206358483928,
+                44.45976739718099
+              ],
+              "rotation": [
+                [
+                  0.999999921901452,
+                  0.00039490047196492163,
+                  1.5833735764483813e-05
+                ],
+                [
+                  -0.0003948740736837402,
+                  0.9999985871747747,
+                  -0.0016339286767022901
+                ],
+                [
+                  -1.647895259976927e-05,
+                  0.00163392229676309,
+                  0.9999986650122951
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module01_1/Sensor02_0",
+              "center_mm": [
+                208.3168307042405,
+                56.21382860462618,
+                46.02262769587054
+              ],
+              "rotation": [
+                [
+                  0.9999999436272835,
+                  0.0003242566532113507,
+                  8.719548399640244e-05
+                ],
+                [
+                  -0.00032441206143360906,
+                  0.9999983484965476,
+                  0.0017882284506600592
+                ],
+                [
+                  -8.661549502017123e-05,
+                  -0.0017882566371194748,
+                  0.9999983973166936
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module01_2/Sensor02_0",
+              "center_mm": [
+                208.3251897089689,
+                93.56204404847303,
+                47.51561008765116
+              ],
+              "rotation": [
+                [
+                  0.9999999621789457,
+                  8.7397435105187e-05,
+                  0.0002607753738061175
+                ],
+                [
+                  -8.697011865164275e-05,
+                  0.9999986543680721,
+                  -0.0016381996958974407
+                ],
+                [
+                  -0.00026091819735005997,
+                  0.0016381769542737996,
+                  0.999998624148034
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module02_3/Sensor03_0",
+              "center_mm": [
+                208.28465343201657,
+                140.8599523083239,
+                49.02457937618911
+              ],
+              "rotation": [
+                [
+                  0.9999999778024294,
+                  0.0001655713896695017,
+                  -0.00013031214679897545
+                ],
+                [
+                  -0.00016560127348111905,
+                  0.9999999599879784,
+                  -0.00022934746492583484
+                ],
+                [
+                  0.00013027416820643806,
+                  0.00022936903969233825,
+                  0.9999999652092417
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_0/Module03_4/Sensor04_0",
+              "center_mm": [
+                208.25943237696225,
+                229.32087175886582,
+                50.53135443033151
+              ],
+              "rotation": [
+                [
+                  0.9999999867460005,
+                  -0.0001274158529186155,
+                  -0.00010135679270951235
+                ],
+                [
+                  0.00012744395769195466,
+                  0.9999999534237664,
+                  0.0002773274291356172
+                ],
+                [
+                  0.00010132145207777364,
+                  -0.00027734034277072147,
+                  0.999999956408148
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module01_0/Sensor02_0",
+              "center_mm": [
+                208.28653,
+                -18.72482,
+                42.89274999999998
+              ],
+              "rotation": [
+                [
+                  -0.9999997189775653,
+                  -0.0006986408602368076,
+                  -0.00027192965726215417
+                ],
+                [
+                  0.0006985962543758047,
+                  -0.9999997425180204,
+                  0.0001640949914794781
+                ],
+                [
+                  -0.00027204423071117546,
+                  0.00016390497632508708,
+                  0.9999999495635463
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module01_1/Sensor02_0",
+              "center_mm": [
+                208.28811741558695,
+                -56.129063267683165,
+                44.49703842343468
+              ],
+              "rotation": [
+                [
+                  -0.9999999386873479,
+                  0.00030010853917146355,
+                  -0.00018044435522133006
+                ],
+                [
+                  -0.00029993767753789223,
+                  -0.9999995073936954,
+                  -0.0009461763876063053
+                ],
+                [
+                  -0.00018072822194678607,
+                  -0.0009461222075328917,
+                  0.9999995360949316
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module01_2/Sensor02_0",
+              "center_mm": [
+                208.29433423979688,
+                -93.57093196636421,
+                45.96578149620574
+              ],
+              "rotation": [
+                [
+                  -0.9999999316352577,
+                  -0.000319675391755874,
+                  -0.00018584166299917752
+                ],
+                [
+                  0.000319574567361841,
+                  -0.9999998018885339,
+                  0.0005423052542631224
+                ],
+                [
+                  -0.00018601498782642103,
+                  0.0005422458269195127,
+                  0.9999998356839301
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module02_3/Sensor03_0",
+              "center_mm": [
+                208.33532495906752,
+                -140.91402599177908,
+                47.478173376103676
+              ],
+              "rotation": [
+                [
+                  -0.9999999982923443,
+                  4.608613864932742e-05,
+                  -3.593576519720554e-05
+                ],
+                [
+                  -4.609617873526011e-05,
+                  -0.9999999598944834,
+                  0.0002794390343320039
+                ],
+                [
+                  -3.592288548990286e-05,
+                  0.00027944069035627377,
+                  0.9999999603112226
+                ]
+              ]
+            },
+            {
+              "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_403/HalfLadder_LadderType12_1/Module03_4/Sensor04_0",
+              "center_mm": [
+                208.3583497723061,
+                -229.27648912502434,
+                49.00785377590203
+              ],
+              "rotation": [
+                [
+                  -0.9999998073741801,
+                  0.000615689494860932,
+                  7.860056359664705e-05
+                ],
+                [
+                  -0.0006156231557485283,
+                  -0.9999994566484552,
+                  0.0008412555642742259
+                ],
+                [
+                  7.911847310232635e-05,
+                  0.0008412070138996782,
+                  0.9999996430554499
+                ]
+              ]
+            }
+          ]
+        }
+      },
+      "inputs": [
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L1T0.txt",
+          "sha256": "d9e090749523b8652fa1c0223c9576f8012c4545e470ba1154fad4255d569960"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L1T1.txt",
+          "sha256": "66820cd121fb59113284409593f1d34a8e9eee24ce468f67454ae7ecab0404e5"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L1T2.txt",
+          "sha256": "2913c5263274992ab3d60aae7c2369386da3862a609ce544c9157e46acb1ca80"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L1T3.txt",
+          "sha256": "a0c14306e6037152241700e0cc6b97ab57c600120d3c60d9a717e89bd1084979"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L1T4.txt",
+          "sha256": "09b3a5cd9ef4a6eba5b08ee27cd74dd3eecf76247cae8a6e9806fbec39e9e99b"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L1B0.txt",
+          "sha256": "334a1670440f5502316aeac8bc5ad04c97b6c66c27a014fab236bc7415375d48"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L1B1.txt",
+          "sha256": "3e2a8948bcf93cc3b931aeb535410fbe331157003ddfa485d46b2233d583af4d"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L1B2.txt",
+          "sha256": "8775887807cb5d15739bdde6f6ae0b085e3b7ebcc2edd993f17edb6b86d6eb2a"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L1B3.txt",
+          "sha256": "19088d41fb3b11fd336cd7b6967d96e66d04247263a7e2b0a2d93525d548f3b2"
+        },
+        {
+          "path": "/u/dramirez/WORK/sts_tools/PointCloudMetrology/input/u3dl/data/L1B4.txt",
+          "sha256": "3fbf10a6e6234f8def846c69032bbf24f210aa4eacde3eddb2aa2fa6cc63839f"
+        }
+      ]
+    }
+  },
+  "baseline_sources": {
+    "config.original.yaml": "15d7f66da37b36f437f545b1dde72667e560f740d477812df86567d40d68ed2d",
+    "labeled_registration.py": "bc08868925d9503be4eb6f25e25574d901cdc274ab468f7df598e3be17384220",
+    "ladder_registration.py": "0166f631a2a66b264957bfcbe025265b118e75b723b65cdccc88bcb819b13c52"
+  }
+}

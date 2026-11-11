@@ -6,8 +6,9 @@ The package is currently developed for the **CBM Silicon Tracking System (STS)**
 
 The current implementation also supports **automatic geometrical segmentation of ladder point clouds into individual sensor clouds**, followed by independent robust plane fitting and surface-residual analysis.
 
-An opt-in **nominal-to-as-built rigid ladder registration** stage uses ROOT-exported
-sensor boxes, enforces all-point uncertainty-expanded containment, and writes
+An opt-in **nominal-to-as-built rigid ladder registration** stage fits segmented
+sensor clouds only to their assigned, optically corrected ROOT sensor facets,
+checks inlier face-band/footprint containment, and writes
 transforms, diagnostics and XY/YZ/perspective overlays. See
 [REGISTRATION.md](REGISTRATION.md) for configuration, frame requirements and
 identifiability limits. It does not change the C-frame reference fit.
@@ -98,15 +99,19 @@ Both modes feed the same downstream sensor-plane fitting and visualization pipel
 
 ### Optional rigid ladder registration
 
-Shared registration settings belong under `ladder_analysis.registration`.
-A named ladder's `registration` mapping overrides shared values field by field;
-`geometry_file` normally selects that ladder's JSON, while `measurement_frame`
-and optimizer controls can be shared. New registration classes fit a single rigid
-correction from nominal geometry to the measured ladder, with sensor relative
-placements held fixed. Every source point participates, independently of the
-segmenter's selected subsets and of `analyze_individual_sensors`. Results include
-all-point containment checks and local surface-observability diagnostics; a
-converged feasible fit is not necessarily unique. See [REGISTRATION.md](REGISTRATION.md).
+Shared fit controls belong under top-level `registration`; per-ladder overrides
+belong under `registration.ladders`. Legacy `ladder_analysis.registration` remains
+accepted for legacy inventories. Registration has no selectable `mode`: remove
+that key from old configurations. Every enabled fit requires segmented sensor
+files, enabled optical metrology and a complete `optical_sensor_map`.
+
+A single rigid correction places the optically corrected geometry against fixed
+cloud-to-facet associations. Sensor relative placements are not refitted. Robust
+sensor-plane outliers are excluded from fitting/containment, but every source row
+is exported with `assigned_sensor_index` and `used_for_fit`. Inlier footprint and
+face-band containment are checked independently of optimizer convergence. Results
+include local surface-observability diagnostics; a converged feasible fit is not
+necessarily unique. See [REGISTRATION.md](REGISTRATION.md).
 
 To inspect the starting geometry/cloud overlay **without running any fits**, use:
 
@@ -1378,7 +1383,8 @@ The principal responsibilities are:
 | `nominal_geometry.py`    | Validated geo-inspector JSON sensor boxes and explicit frame/unit contract       |
 | `root_geometry.py`       | External geo-inspector execution, staged publication and manifest validation     |
 | `ladder_metrology.py`    | External optical execution and corrected nominal-geometry preparation            |
-| `ladder_registration.py` | Local constrained rigid registration and observability diagnostics               |
+| `ladder_registration.py` | Shared registration options/validation and preview-only box evaluation           |
+| `labeled_registration.py`| Assigned corrected-facet rigid fit and observability diagnostics                 |
 | `registration_stage.py`  | Opt-in pipeline adapter and per-point registration exports                       |
 | `registration_viz.py`    | Translucent nominal/fitted geometry and measured-cloud three-view overlays       |
 | `ladder_viz.py`          | Sensor-plane residual visualization                                              |
@@ -1412,7 +1418,7 @@ python -m pytest
 
 The current test suite covers core point-cloud loading, pipeline registration,
 reference handling, rigid-registration mathematics, uncertainty propagation, and
-nominal ladder registration including all-point containment, exported frames/units,
+assigned-facet ladder registration including inlier containment, exported frames/units,
 observability diagnostics and three-view overlays.
 
 ---
@@ -1518,7 +1524,7 @@ The current repository establishes important pieces of this hierarchy:
 * detector-frame ladder point-cloud handling;
 * sensor segmentation;
 * independent sensor surface-plane measurements;
-* optional nominal-to-as-built rigid ladder corrections with all-point containment;
+* optional nominal-to-as-built rigid ladder corrections with assigned corrected-facet inlier containment;
 * uncertainty-aware alignment products.
 
 Full sensor rigid-body alignment additionally requires reliable in-plane constraints.
@@ -1565,7 +1571,7 @@ Important current limitations include:
 
 * automatic segmentation is based on detector-frame `Z` gaps and a `Y` center line rather than a full nominal sensor geometry model;
 * sensor plane fitting does not by itself determine `Tx`, `Ty`, and `Rz`;
-* nominal ladder registration is local and may be underconstrained or face/sensor-ambiguous; containment alone does not establish unique in-plane deviations;
+* assigned-facet ladder registration is local and may be underconstrained; fixed associations and containment do not establish unique in-plane deviations;
 * registration uses conditional point covariance but does not yet propagate common C-frame uncertainty into a ladder-pose covariance;
 * the current workflow relies on externally supplied measured reference centers rather than fitting physical reference features from raw scans;
 * instrument-specific systematic uncertainty still needs to be represented by an appropriate measurement uncertainty model;

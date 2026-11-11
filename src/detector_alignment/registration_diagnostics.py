@@ -12,7 +12,6 @@ from threading import Event, Thread, get_ident
 from time import perf_counter
 import traceback
 
-from .ladder_registration import LadderRegistrar
 
 
 def _stack_location(thread_id: int) -> str:
@@ -30,7 +29,7 @@ def _stack_location(thread_id: int) -> str:
 
 @contextmanager
 def registration_heartbeat(logger, ladder_name: str, phase: str,
-                           interval_seconds: float = 15.0, registrar=None):
+                           interval_seconds: float = 15.0):
     """Log progress while a potentially blocking registration fit is running."""
     stop = Event()
     owner = get_ident()
@@ -38,16 +37,10 @@ def registration_heartbeat(logger, ladder_name: str, phase: str,
 
     def report():
         while not stop.wait(interval_seconds):
-            extra = ""
-            if registrar is not None:
-                extra = (
-                    f" | evaluate_calls={registrar.evaluate_calls}"
-                    f" | evaluate_seconds={registrar.evaluate_seconds:.3f}"
-                )
             logger.warning(
                 "Ladder %s registration | phase=%s | status=running | "
-                "elapsed_s=%.1f%s | stack=%s",
-                ladder_name, phase, perf_counter() - started, extra,
+                "elapsed_s=%.1f | stack=%s",
+                ladder_name, phase, perf_counter() - started,
                 _stack_location(owner),
             )
 
@@ -66,20 +59,3 @@ def registration_heartbeat(logger, ladder_name: str, phase: str,
             "Ladder %s registration | phase=%s | status=finished | elapsed_s=%.3f",
             ladder_name, phase, perf_counter() - started,
         )
-
-
-class InstrumentedNearestBoxRegistrar(LadderRegistrar):
-    """Count and time completed dense nearest-box evaluations without altering math."""
-
-    def __init__(self, options=None):
-        super().__init__(options)
-        self.evaluate_calls = 0
-        self.evaluate_seconds = 0.0
-
-    def evaluate(self, *args, **kwargs):
-        started = perf_counter()
-        try:
-            return super().evaluate(*args, **kwargs)
-        finally:
-            self.evaluate_calls += 1
-            self.evaluate_seconds += perf_counter() - started

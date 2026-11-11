@@ -1,0 +1,309 @@
+{
+  "convention": "p_as_built = R @ p_nominal + T; both in measurement_frame",
+  "transform_kind": "single rigid ladder correction in C-frame coordinates",
+  "measurement_frame": "/sts_v26a/Unit04L_10",
+  "nominal_ladder_node": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401",
+  "rotation_matrix": [
+    [
+      0.9961941725489549,
+      0.08715597891920537,
+      -0.0010029547037386341
+    ],
+    [
+      -0.08715546877969263,
+      0.9961945748045259,
+      0.0005416565531892523
+    ],
+    [
+      0.0010463466417703197,
+      -0.00045218211444094785,
+      0.9999993503448091
+    ]
+  ],
+  "rotation_vector_rad": [
+    -0.0004975507120210442,
+    -0.0010259525784350552,
+    -0.08726646259680129
+  ],
+  "translation_vector_mm": [
+    -4.613432967214123,
+    2.7571381174146614,
+    -0.0741711296077483
+  ],
+  "homogeneous_matrix": [
+    [
+      0.9961941725489549,
+      0.08715597891920537,
+      -0.0010029547037386341,
+      -4.613432967214123
+    ],
+    [
+      -0.08715546877969263,
+      0.9961945748045259,
+      0.0005416565531892523,
+      2.7571381174146614
+    ],
+    [
+      0.0010463466417703197,
+      -0.00045218211444094785,
+      0.9999993503448091,
+      -0.0741711296077483
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "nominal_pivot_mm": [
+    89.29389359935429,
+    0.0017580373706437059,
+    46.744986897550206
+  ],
+  "pivot_displacement_mm": [
+    -4.999999999702339,
+    -4.999999999998959,
+    0.019230073014092852
+  ],
+  "accepted": false,
+  "feasible": false,
+  "optimizer_success": true,
+  "optimizer_message": "`ftol` termination condition is satisfied.",
+  "iterations": 8,
+  "total_points": 300956,
+  "inlier_points": 293414,
+  "outlier_points": 7542,
+  "uncertainty_sigma": 3.0,
+  "containment_tolerance_mm": 0.1,
+  "initial": {
+    "surface_rms_mm": 0.09070672384029493,
+    "surface_max_abs_mm": 0.251088975203737,
+    "outside_points": 120,
+    "max_containment_violation_mm": 1.3882199335914436
+  },
+  "final": {
+    "surface_rms_mm": 0.03786922345721293,
+    "surface_max_abs_mm": 0.1320684116442999,
+    "outside_points": 59565,
+    "max_containment_violation_mm": 28.332679237677432
+  },
+  "sensor_surface_assignments": [
+    {
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_0/Sensor02_0",
+      "points": 18861,
+      "inliers": 18611
+    },
+    {
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_1/Sensor02_0",
+      "points": 23479,
+      "inliers": 22944
+    },
+    {
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_2/Sensor02_0",
+      "points": 26282,
+      "inliers": 25673
+    },
+    {
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module02_3/Sensor03_0",
+      "points": 40500,
+      "inliers": 37935
+    },
+    {
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module03_4/Sensor04_0",
+      "points": 68758,
+      "inliers": 67319
+    },
+    {
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_0/Sensor02_0",
+      "points": 17024,
+      "inliers": 16779
+    },
+    {
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_1/Sensor02_0",
+      "points": 18562,
+      "inliers": 18225
+    },
+    {
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_2/Sensor02_0",
+      "points": 19329,
+      "inliers": 18621
+    },
+    {
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module02_3/Sensor03_0",
+      "points": 28169,
+      "inliers": 27711
+    },
+    {
+      "node_path": "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module03_4/Sensor04_0",
+      "points": 39992,
+      "inliers": 39596
+    }
+  ],
+  "observability": {
+    "locally_surface_identifiable": true,
+    "surface_jacobian_rank": 6,
+    "singular_values": [
+      546.8690578315988,
+      279.94614985787655,
+      33.285622640265935,
+      0.4759179840829354,
+      0.09502590668688622,
+      0.048757876114653195
+    ],
+    "nullspace_scaled": [],
+    "parameter_order": [
+      "scale_rx",
+      "scale_ry",
+      "scale_rz",
+      "dx",
+      "dy",
+      "dz"
+    ],
+    "rotation_scale_mm": 293.00432804190154,
+    "scope": "inlier surface residuals only; excludes containment inequalities"
+  },
+  "warnings": [
+    "Excluded 7542 sensor-plane outliers from fit and containment; original rows retained",
+    "Inlier face-band / footprint containment failed; fit is diagnostic only"
+  ],
+  "performance": {
+    "filtering_seconds": 0.16407198109664023,
+    "statistics_seconds": 0.045414309948682785,
+    "optimizer_seconds": 0.01705753488931805,
+    "validation_seconds": 1.0769342340063304,
+    "total_seconds": 1.6106832269579172,
+    "optimizer_residual_count": 40,
+    "optimizer_nfev": 8,
+    "optimizer_njev": 8
+  },
+  "comparison_weight": 0.0,
+  "snapshot_sha256": "e6cb948c05ea648324cee46b922c22da0d6abd9d3860087f728563b60333df8a",
+  "inlier_mask_sha256": "82f2bab97579435d7da846be07908c5914839faa4a6c185766b72a8ab6e94268",
+  "implementation_sha256": "bc08868925d9503be4eb6f25e25574d901cdc274ab468f7df598e3be17384220",
+  "xy_footprints": {
+    "initial": {
+      "all": {
+        "outside_footprint_points": 119,
+        "max_footprint_excess_mm": 1.2882199335914422,
+        "sum_squared_footprint_excess_mm2": 24.732688052814805
+      },
+      "sensors": {
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_0/Sensor02_0": {
+          "outside_footprint_points": 8,
+          "max_footprint_excess_mm": 1.072883237136125,
+          "sum_squared_footprint_excess_mm2": 1.757833284427248
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_1/Sensor02_0": {
+          "outside_footprint_points": 19,
+          "max_footprint_excess_mm": 0.9842264929459931,
+          "sum_squared_footprint_excess_mm2": 2.0074816657386125
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_2/Sensor02_0": {
+          "outside_footprint_points": 17,
+          "max_footprint_excess_mm": 0.9690459060637054,
+          "sum_squared_footprint_excess_mm2": 3.37886709963189
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module02_3/Sensor03_0": {
+          "outside_footprint_points": 12,
+          "max_footprint_excess_mm": 0.4721651199295174,
+          "sum_squared_footprint_excess_mm2": 0.7968720576829034
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module03_4/Sensor04_0": {
+          "outside_footprint_points": 20,
+          "max_footprint_excess_mm": 1.270530168928687,
+          "sum_squared_footprint_excess_mm2": 7.747862983609252
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_0/Sensor02_0": {
+          "outside_footprint_points": 6,
+          "max_footprint_excess_mm": 0.8090873606026321,
+          "sum_squared_footprint_excess_mm2": 1.0208344809735117
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_1/Sensor02_0": {
+          "outside_footprint_points": 9,
+          "max_footprint_excess_mm": 1.2882199335914422,
+          "sum_squared_footprint_excess_mm2": 4.059677055770133
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_2/Sensor02_0": {
+          "outside_footprint_points": 4,
+          "max_footprint_excess_mm": 0.8488017892780491,
+          "sum_squared_footprint_excess_mm2": 0.7441346995422113
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module02_3/Sensor03_0": {
+          "outside_footprint_points": 9,
+          "max_footprint_excess_mm": 0.26489550409359097,
+          "sum_squared_footprint_excess_mm2": 0.1141102810582447
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module03_4/Sensor04_0": {
+          "outside_footprint_points": 15,
+          "max_footprint_excess_mm": 1.16387256731214,
+          "sum_squared_footprint_excess_mm2": 3.1050144443807977
+        }
+      }
+    },
+    "final": {
+      "all": {
+        "outside_footprint_points": 59565,
+        "max_footprint_excess_mm": 28.23267923767743,
+        "sum_squared_footprint_excess_mm2": 5247764.7171717165
+      },
+      "sensors": {
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_0/Sensor02_0": {
+          "outside_footprint_points": 797,
+          "max_footprint_excess_mm": 3.9693850561419945,
+          "sum_squared_footprint_excess_mm2": 2294.6321973722083
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_1/Sensor02_0": {
+          "outside_footprint_points": 173,
+          "max_footprint_excess_mm": 1.676572625231202,
+          "sum_squared_footprint_excess_mm2": 49.09383933651945
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module01_2/Sensor02_0": {
+          "outside_footprint_points": 1183,
+          "max_footprint_excess_mm": 4.810044493636191,
+          "sum_squared_footprint_excess_mm2": 4152.690110932467
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module02_3/Sensor03_0": {
+          "outside_footprint_points": 4358,
+          "max_footprint_excess_mm": 9.164139815567033,
+          "sum_squared_footprint_excess_mm2": 73453.21061570325
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_0/Module03_4/Sensor04_0": {
+          "outside_footprint_points": 16791,
+          "max_footprint_excess_mm": 20.027782444326895,
+          "sum_squared_footprint_excess_mm2": 1272703.2593906734
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_0/Sensor02_0": {
+          "outside_footprint_points": 1532,
+          "max_footprint_excess_mm": 6.590820365971929,
+          "sum_squared_footprint_excess_mm2": 12297.18722085379
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_1/Sensor02_0": {
+          "outside_footprint_points": 4611,
+          "max_footprint_excess_mm": 9.958277962022606,
+          "sum_squared_footprint_excess_mm2": 86226.6858856531
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module01_2/Sensor02_0": {
+          "outside_footprint_points": 5297,
+          "max_footprint_excess_mm": 12.866717550073425,
+          "sum_squared_footprint_excess_mm2": 159186.65298783
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module02_3/Sensor03_0": {
+          "outside_footprint_points": 8105,
+          "max_footprint_excess_mm": 18.099376753963142,
+          "sum_squared_footprint_excess_mm2": 534167.2722380535
+        },
+        "/sts_v26a/Unit04L_10/Ladder_LadderType12_401/HalfLadder_LadderType12_1/Module03_4/Sensor04_0": {
+          "outside_footprint_points": 16718,
+          "max_footprint_excess_mm": 28.23267923767743,
+          "sum_squared_footprint_excess_mm2": 3103234.032685312
+        }
+      }
+    }
+  },
+  "rotation_vector_deg": [
+    -0.028507555892534866,
+    -0.05878275272489322,
+    -4.999999999832972
+  ]
+}

@@ -1,7 +1,7 @@
 # Nominal-to-as-built ladder registration
 
 This opt-in stage fits **one rigid correction per ladder**, holding the relative
-sensor positions, orientations and dimensions fixed **after optional optical
+sensor positions, orientations and dimensions fixed **after mandatory optical
 geometry preparation**. It does not change the C-frame alignment or refit
 individual sensor placements. It is independent of the existing sensor-plane
 analysis.
@@ -26,11 +26,16 @@ analysis.
    registration. For data **already in C-frame coordinates**, use the standalone
    API below, or the pipeline's original scanner files; do not apply the C-frame
    transform to already-aligned files a second time.
-5. In `automatic` mode, registration uses the **complete ladder source file**,
-   not the automatic segmenter's selected subset. In `segmented_files` mode it
-   concatenates every configured sensor file in configuration order. Every point
-   must be a sensor-surface measurement. Both modes match against the union of
-   nominal sensors; measured sensor names are not guessed to be geometry IDs.
+5. Registration requires `segmented_files`: exactly one measured cloud per ROOT
+   sensor. Files are concatenated in configuration order, retaining every row.
+   Cloud median Y and corrected sensor-center Y (at the initial pose) establish
+   a fixed one-to-one association. Duplicate Y centers, missing/extra clouds and
+   pairs beyond `pairing_tolerance_mm` are rejected. Manufacturing names are not
+   guessed to be ROOT geometry IDs. The fit never reassigns points to nearer boxes.
+6. Every enabled fit requires `ladder_metrology.enabled: true` and a complete
+   `optical_sensor_map`. Uncorrected ROOT geometry is never a registration target.
+   There is no `registration.mode` setting; legacy values, including
+   `labeled_faces`, must be removed and are rejected even on disabled blocks.
 
 The numerical registration implementation does not import ROOT. When
 `root_geometry.enabled`, normal pipeline processing first invokes the independent
@@ -44,8 +49,11 @@ For U3DL half-unit work, use either the dataset-local
 **`PointCloudMetrology/input/u3dl/config.yaml`** or the equivalent workspace-oriented
 **`sts_tools/config.yaml`**. Both contain the laser settings, `half_unit`,
 `root_geometry`, and `ladder_metrology`; their relative paths are rebased to their
-own directories but resolve to the same inputs and `output/U3DL` hierarchy. Other
-configurations remain supported when either external stage is absent or disabled.
+own directories but resolve to the same inputs and `output/U3DL` hierarchy.
+Their fit switches differ: the dataset config enables registration while the
+workspace config keeps it disabled for preview preparation. C-frame processing
+and preview remain available without optical corrections; enabled registration
+requires them. Existing ROOT exports may be supplied without a managed ROOT stage.
 
 `RootGeometryDriver` executes `python -m geo_inspector ladder ...` through a
 bounded, shell-free subprocess. The ROOT source file, node selector, frame,
@@ -174,9 +182,9 @@ prepared geometry.
 The workspace U3DL assembly inventory has 3 ladders (10, 10, 6 sensors).
 Y-order association has been checked against those three exported ROOT ladders;
 it does not by itself verify the detector/C-frame equivalence or the bridge.
-These are deliberately not assigned to `L3DL*` manufacturing IDs. Registration
-remains disabled, and corrected preview requires verified assembly/module/ROOT
-mappings and valid geometry files before it can succeed.
+Corrected preview and registration require complete assembly/module/ROOT
+mappings and valid geometry files. The workspace-root configuration keeps fitting
+disabled; enabling it does not bypass these requirements.
 
 ## Inspect the initial pose without running registration
 
@@ -219,7 +227,9 @@ error; preview never guesses an assembly or ROOT sensor association.
 Preview-specific defaults are **150 DPI** and **20,000 displayed points per
 ladder**, independent of potentially expensive production rendering settings.
 Bounds, RMS, containment counts and total-point counts use every source point;
-sampling affects only display. Outputs are isolated in:
+sampling affects only display. Preview distances are nearest-box diagnostics,
+not assigned-facet residuals or fit acceptance tests. This evaluator has no
+optimizer and accepts unsegmented inputs for inspection only. Outputs are isolated in:
 
 ```text
 output_dir/
@@ -256,14 +266,19 @@ fields override shared fields, independently of `ladder_analysis.enabled`:
 half_unit:
   ladders:
     L3DL0:
-      file: data/L3DL0.txt
+      assembly_ladder: L3DL100112
       segmentation:
-        mode: automatic
+        mode: segmented_files
+      sensors:
+        - {name: measured_sensor_0, file: data/sensor_0.txt}
+        - {name: measured_sensor_1, file: data/sensor_1.txt}
+# Optical producer settings must also be configured and enabled; see above.
 registration:
   enabled: true
   measurement_frame: global
   uncertainty_sigma: 3.0
   containment_tolerance_mm: 1.0e-6
+  footprint_penalty_weight: 100.0
   max_translation_mm: 5.0
   max_rotation_deg: 5.0
   max_iterations: 300
@@ -271,6 +286,7 @@ registration:
   ladders:
     L3DL0:
       geometry_file: data/L3DL0_geometry.json
+      optical_sensor_map: {mode: y_order, sensor_to_geometry: ladder_aligned_box_center}
       max_translation_mm: 2.0 # Overrides only this field.
 ladder_analysis:
   enabled: false # Registration and transformed cloud exports still run.
@@ -307,10 +323,15 @@ per-ladder blocks supply them. Unknown keys and invalid values are rejected.
 | `measurement_frame`        | required | Explicit matching coordinate-frame identity                               |
 | `initial_transform`        | identity | Nominal-to-as-built 4x4 rigid matrix, translation in mm                   |
 | `uncertainty_sigma`        | `3.0`    | Positive multiplier on projected point standard deviation                 |
-| `containment_tolerance_mm` | `1e-6`   | Positive numerical allowance in optimization and final containment check  |
+| `containment_tolerance_mm` | `1e-6`   | Positive allowance shared by the XY penalty and final containment check   |
+| `footprint_penalty_weight` | `100.0`  | Nonnegative dimensionless weight on squared XY excess; `0` disables only the penalty for diagnostic comparison |
 | `max_translation_mm`       | `5.0`    | Per-component bound on pivot displacement relative to initial pose        |
 | `max_rotation_deg`         | `5.0`    | Per-component bound on the incremental rotation vector, in degrees        |
-| `max_iterations`           | `300`    | Warm-start evaluation limit and constrained-optimizer iteration limit     |
+| `max_iterations`           | `300`    | Maximum least-squares function evaluations                               |
+| `facet_z_mm`               | `0.0`    | C-frame facet Z used to select each sensor's outward face                 |
+| `outlier_sigma`            | `3.0`    | Robust sensor-plane filtering threshold in scaled MAD units               |
+| `pairing_tolerance_mm`     | `15.0`   | Maximum measured/initial corrected sensor-center Y difference             |
+| `diagnostic_interval_s`    | `15.0`   | Progress heartbeat interval                                               |
 | `draw`                     | `true`   | Registration image switch, independent of existing residual-plot switches |
 
 The pivot is the mean nominal sensor center, **not an inferred mechanical ladder
@@ -324,45 +345,72 @@ Point uncertainty uses `half_unit.uncertainty` by default; a point-cloud entry
 may override it. Legacy top-level `uncertainty` remains accepted.
 Covariances must be symmetric and positive semidefinite. All concatenated input
 files must have covariance, or all must omit it; mixed availability is rejected.
-Without covariance, boxes are unexpanded and a warning is recorded.
+Without covariance, the face uncertainty band has zero width and a warning is
+recorded; lateral footprints are unexpanded.
 
 ## Objective and hard containment
 
-For a measured point `p`, nominal sensor center `c`, sensor orientation `S`, and
-trial ladder correction `(R, T)`, compute sensor-local coordinates
+Each corrected sensor contributes exactly one outward local-Z facet, selected by
+its position relative to `facet_z_mm`. Sensor local Z must align with C-frame Z
+(`abs(S[2,2]) >= 0.99`); a center on the C-frame facet is ambiguous and rejected.
+For fixed assigned sensor center `c`, orientation `S`, outward unit normal `n`,
+face center `f`, and trial ladder correction `(R, T)`:
 
 ```text
 u = (R @ S).T @ (p - (R @ c + T))
-q = abs(u) - dimensions / 2
-signed_surface_distance = norm(max(q, 0)) + min(max(q), 0)
+signed_surface_distance = dot(p - (R @ f + T), R @ n)
 ```
 
-The objective is the **unweighted mean squared distance to the nearest sensor
-box surface**, not to a sensor center plane or merely to its occupied volume.
-Residuals are negative inside the nominal volume and positive outside it.
-Sensor dimensions and relative placements are never optimization variables.
+The objective combines **unweighted squared assigned-facet plane distances** with
+**weighted squared XY footprint violations**, after per-cloud robust height/PCA
+filtering. Exact sufficient statistics compress the surface term to four residuals
+per sensor; the footprint term adds one residual per inlier. No numerical point
+subsampling is used. All input rows, including excluded outliers, remain in the exported CSV.
+Sensor labels and outward faces stay fixed throughout optimization. Neither
+individual sensor geometry nor nearest-box assignments are optimized.
 
 For point covariance `C`, let `A = R @ S` and
 
 ```text
 padding[a] = uncertainty_sigma * sqrt((A.T @ C @ A)[a, a])
-sensor_margin = min_a(dimensions[a] / 2 + padding[a] - abs(u[a]))
-point_margin = max_over_sensors(sensor_margin)
+lateral_margin = min_a_in_XY(dimensions[a] / 2 + padding[a] - abs(u[a]))
+normal_margin = padding[Z] - abs(signed_surface_distance)
+point_margin = min(lateral_margin, normal_margin)
 ```
 
-Every point must have `point_margin >= -containment_tolerance_mm`. This is a hard
-constraint in the final SLSQP solve and is independently checked afterward on
-**all input points**. There is no outlier rejection or numerical subsampling.
-A penalty-based least-squares fit is only an initializer, never the acceptance
-criterion. The uncertainty envelope is an axiswise marginal k-sigma box, not an
-exact covariance-ellipsoid intersection test or a simultaneous confidence bound
-for an entire cloud. Gaussian tails, incorrect geometry, or nuisance points can
-make all-point containment impossible at a selected k; the stage does not
-silently discard such points or enlarge k.
+At every trial pose, the optimizer appends a fixed-length vector:
 
-This is a bounded **local** optimization with nearest-surface correspondence
-changes, not a guarantee of the global minimum. Review initialization, bounds,
-convergence and residuals for real measurements.
+```text
+excess_i = max(0, -lateral_margin_i - containment_tolerance_mm)
+footprint_residual_i = sqrt(footprint_penalty_weight) * excess_i
+objective = sum_i(surface_distance_i**2) + footprint_penalty_weight * sum_i(excess_i**2)
+```
+
+Each inlier contributes its worst-axis XY excess in mm; a point outside both X
+and Y is not counted twice. Allowed points contribute zero. The covariance is
+projected in the trial sensor frame, using the same calculation as final
+validation. Excluded plane outliers do not contribute to either objective term.
+The face-normal band is **not** an additional penalty: face distance remains the
+surface objective, and normal-band containment remains a final acceptance gate.
+The default weight `100` makes equal-depth XY violations contribute 100 times the
+squared cost of face residuals. It is a tunable starting value, not a physical
+prior or guarantee of feasibility. `0` is for plane-only diagnostic comparisons.
+All weights leave acceptance unchanged. Use YAML numeric literals such as `0.1`
+or `1.0e-1`; PyYAML reads `1e-1` as a string, which validation rejects.
+
+Every **inlier** must still have `point_margin >= -containment_tolerance_mm` for
+the same assigned sensor. This finite-footprint and face-band acceptance check
+runs independently on full-resolution inliers after bounded least squares. The
+XY penalty is soft, not a hard inequality or a union-of-boxes constraint. A
+finite weight can leave violations, even when a feasible pose exists. Minimizing
+squared depth also need not minimize the number of failing points. Optimizer
+success alone does not establish acceptance; failed containment leaves a diagnostic candidate.
+Outlier counts and fit-use flags are explicit; tolerances are never enlarged to
+make a result pass. The axiswise marginal k-sigma envelope is not an exact
+covariance-ellipsoid intersection or simultaneous whole-cloud confidence bound.
+
+This remains a bounded **local** optimization, not a guarantee of a unique or
+global solution. Review initialization, bounds, correspondence and residuals.
 
 ## Outputs and interpretation
 
@@ -384,27 +432,44 @@ For each configured ladder `<name>`, the pipeline writes:
 - `results.json["ladder_registrations"]["<name>"]`: rotation, translation,
   rotation vector, homogeneous correction, frame/node identity, options, input
   provenance, before/after RMS and maximum surface residual, outside-point count,
-  maximum containment violation, nearest-surface sensor counts, convergence,
-  acceptance, observability and warnings.
+  maximum containment violation, assigned-sensor/inlier counts, convergence,
+  acceptance, observability and warnings. Initial/final metrics also include
+  `outside_footprint_points`, `max_footprint_excess_mm` (beyond tolerance), and
+  `footprint_penalty_sum_sq_mm2`; per-sensor metrics appear under
+  `sensor_surface_assignments`. `footprint_penalty_weight` and `objective` document
+  the fit tradeoff. Surface RMS and surface Jacobian rank exclude penalty rows.
 - `registration/<name>_nominal_to_as_built.npy`: the 4x4 correction, including a
   **diagnostic candidate** when the fit is not accepted. Always check the JSON
   status before using it downstream.
 - `registration/<name>_point_residuals.csv`: one row per input point, preserving
   input-file/row order. Columns are point index, detector-frame XYZ in mm,
-  nearest-surface sensor index, signed surface distance in mm, and containment
-  margin in mm. Sensor indices refer to the geometry JSON sensor order and the
-  JSON summary's sensor list. The nearest surface and the sensor with the best
-  expanded-box containment need not be the same in overlap regions.
+  `assigned_sensor_index`, `signed_surface_distance_mm`, `containment_margin_mm`,
+  and `used_for_fit` (0 or 1). Sensor indices refer to the geometry JSON sensor
+  order and the JSON summary's sensor list. Excluded outliers retain their original
+  assignments and rows. Both residuals and containment use the assigned facet.
 - `images/registration/<name>_ladder_registration.png`: **XY, YZ and perspective** in one image,
-  with measured points coloured by surface distance, dashed nominal outlines,
-  and translucent fitted sensor volumes. YZ uses labelled independent axis
-  scales; perspective expands the Z display scale when necessary and labels it.
-  Sampling limits display only; plot bounds, colour scale, fitting and containment
-  checks use the full cloud. The colour scale has a 1 µm minimum span so exact
-  synthetic fits remain readable.
+  with measured points coloured by their assigned sensor, matching each
+  optically corrected sensor volume and its dashed pre-fit outline. A dotted
+  outline in that same colour shows the fitted outward-facet acceptance envelope:
+  the finite XY footprint and face-normal band expanded by the **largest inlier
+  projected uncertainty per sensor** plus `containment_tolerance_mm`. With no
+  covariance, it shows tolerance alone. Because uncertainty can differ per point,
+  this is an outer visual guide, **not** the per-point acceptance test; a point
+  inside the outline may still fail its own containment check. YZ uses labelled
+  independent axis scales; perspective expands the Z display scale when necessary
+  and labels it. Sampling limits
+  display only; plot bounds use the full cloud, while fitting and containment
+  use full-resolution inliers. Preview-only plots retain the surface-distance
+  colour scale and colourbar.
 
-`accepted` means that the constrained optimizer converged **and** every point
-passed containment. It does **not** imply a unique pose. A failed fit remains an
+The JSON retains `registration_mode: labeled_faces` as a **fixed output
+compatibility marker**, not a configuration switch. Its
+`registration_reference_geometry` is always `optically_corrected_nominal_sensors`.
+The LadderRegistration bridge consumes `assigned_sensor_index` and retains every
+row, including outliers, for its own downstream processing.
+
+`accepted` means that the optimizer converged **and** every inlier
+passed its assigned facet's containment check. It does **not** imply a unique pose. A failed fit remains an
 explicitly labelled diagnostic candidate; other ladders can still be processed.
 Malformed input/configuration raises an error instead. Disabled registration or
 drawing removes its known stale products for still-configured ladders; outputs
@@ -414,10 +479,9 @@ for ladders removed entirely from configuration are not automatically deleted.
 
 A partial planar surface generally cannot uniquely measure in-plane translations
 or rotation about its normal. Footprint containment may bound these parameters
-without selecting a unique solution. Unlabelled thin boxes also permit front/back
-surface ambiguity, and repeated sensor layouts can permit alternative matches.
-No edge samples, face identities, point-to-CAD correspondences, or scan coverage
-are assumed merely because a point is near a nominal sensor.
+without selecting a unique solution. Fixed sensor and outward-face associations
+prevent nearest-box/front-back switching but do not establish scan coverage or
+measured edges. Association still depends on a valid C-frame/ROOT mapping.
 
 The result therefore includes a local surface-residual Jacobian rank, singular
 values, and nullspace directions. Rotation parameters are scaled by a recorded
@@ -430,38 +494,32 @@ measured deviations.
 
 Containment uses measurement covariance conditional on the fixed C-frame fit;
 common C-frame uncertainty and instrument systematics are not propagated into a
-ladder pose covariance in this first implementation. Face labels, measured edges
-or fiducials, explicit sensor correspondences, multi-start ambiguity studies, and
-correlated frame/pose uncertainty propagation are useful subsequent developments.
+ladder pose covariance. Measured edges or fiducials, multi-start ambiguity studies,
+and correlated frame/pose uncertainty propagation remain useful developments.
 
 ## Standalone API for already-aligned clouds
 
-```python
-from detector_alignment.io import AsciiPointCloudLoader
-from detector_alignment.nominal_geometry import NominalLadder
-from detector_alignment.ladder_registration import LadderRegistrar, RegistrationOptions
-from detector_alignment.registration_viz import RegistrationVisualizer
+The former `LadderRegistrar.fit` nearest-box API has been removed. Use
+`LabeledFaceRegistrar.fit(corrected_geometry, points, sensor_indices, covariances,
+initial_transform)` for numerical work on already-aligned data. The caller must
+prepare corrected geometry through `LadderGeometryPreparation` and establish a
+complete set of ROOT sensor-list indices before calling it. Loading raw geometry
+with `NominalLadder.from_json` alone does not apply optical corrections.
 
-geometry = NominalLadder.from_json("ladder_geometry.json", expected_frame="global")
-cloud = AsciiPointCloudLoader().load(
-    "ladder_in_matching_frame.xyz",
-    {"mode": "constant", "sigma_xyz_mm": [0.008, 0.008, 0.008]},
-)
-result = LadderRegistrar(RegistrationOptions()).fit(geometry, cloud.points, cloud.covariances)
-summary = result.summary(geometry)
-RegistrationVisualizer().plot(
-    geometry, cloud.points, result, "ladder_registration.png", ladder_name="L3DL0"
-)
-# Check result.accepted, summary["observability"], and result.warnings before use.
-```
+The pipeline stage enforces correction provenance; the low-level numerical API
+cannot infer provenance from arrays. Check `result.accepted`, its observability
+summary and warnings before using its homogeneous correction.
+
+`SensorBoxEvaluator` supports preview diagnostics only and has no fitting API.
 
 ## Validation
 
-Run `python -m pytest tests/test_ladder_registration.py tests/test_registration_pipeline.py -q`.
-The tests exercise exported-frame/unit handling, rigid pose recovery, rotated
-boxes and anisotropic covariance, partial-plane ambiguity, infeasible all-point
-constraints, initial-pose/pivot conventions, configuration failures, independent
-pipeline integration, complete point exports, and translucent three-view PNGs.
+Run `python -m pytest tests/test_labeled_registration.py tests/test_ladder_registration.py tests/test_registration_pipeline.py tests/test_stage_config.py -q`.
+The tests exercise exported-frame/unit handling, assigned-facet rigid recovery,
+preview box distances and anisotropic covariance, partial-plane ambiguity,
+infeasible inlier footprints, initial-pose/pivot conventions, obsolete-mode and
+missing-optical failures, fixed correspondence, complete point exports, and
+translucent three-view PNGs.
 Preview tests additionally forbid optimizer/alignment calls, verify both input
 modes and non-identity saved/initial transformations, preserve existing fit
 products, and exercise missing/non-rigid cached matrices and path/ladder selection.
